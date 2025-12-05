@@ -1,0 +1,638 @@
+pub(crate) mod document_list {
+    use std::{default, f32::MAX, fs, path::PathBuf, sync::Arc, thread::current};
+
+    use derivative::Derivative;
+    use file_format::FileFormat;
+    use iced::{Alignment::Center, Background, Border, Color, ContentFit, Element, Gradient, Length, Shadow, Subscription, Task, advanced::widget::{Operation, operation::{self, focusable}}, event::{self, Event}, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, widget::{Container, MouseArea, Space, Text, TextInput, button, column, container::{self, Style}, focus_next, focus_previous, horizontal_rule, image::{self, Viewer, viewer}, text_input, mouse_area, row, text_input::{Id}, vertical_rule}};
+    use iced_aw::{Card, TabBarPosition, TabLabel, Tabs};
+    use iced_table::{Table, table, table::Column};
+    use rfd::FileDialog;
+    use time::{OffsetDateTime, PrimitiveDateTime, UtcDateTime, format_description, macros::{format_description, offset}};
+
+    use crate::{db::db_module::DbConnection, screen::{Attachment, Document, document}};
+
+    #[derive(Debug, Clone, Default)]
+    pub(crate) struct DocumentList {
+        documents: Vec<Arc<Document>>,
+        search_text: String,
+        current_open_document: Option<Arc<Document>>,
+        current_document_tab: Tab,
+        current_document_number: String,
+        current_document_type: String,
+        current_comment: String,
+        current_open_attachment: Option<Arc<Attachment>>,
+        current_attachment_reference_number: String,
+        current_attachment_comment: String,
+        data_changed: bool,
+        create_new_document: bool,
+        create_new_attachment: bool,
+        current_file_path: Option<String>,
+        file_path_changed: bool,
+        input1_id: Option<Id>,
+        input2_id: Option<Id>,
+        input3_id: Option<Id>
+    }
+
+    impl DocumentList {
+        pub(crate) fn new() -> DocumentList {
+            DocumentList {
+                documents: Result::expect(DbConnection::new().read_document_table(), "Error retrieving data from database."),
+                search_text: String::from(""),
+                current_open_document: None,
+                current_document_tab: Tab::default(),
+                current_document_number: String::default(),
+                current_document_type: String::default(),
+                current_comment: String::default(),
+                current_open_attachment: None,
+                current_attachment_reference_number: String::default(),
+                current_attachment_comment: String::default(),
+                data_changed: false,
+                create_new_document: false,
+                create_new_attachment: false,
+                current_file_path: None,
+                file_path_changed: false,
+                input1_id: Some(Id::new("1")),
+                input2_id: Some(Id::new("2")),
+                input3_id: Some(Id::new("3"))
+            }
+        }
+
+        pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
+            match message {
+                Message::NewDocument => {
+                    self.create_new_document = true;
+                    self.current_document_number.clear();
+                    self.current_document_type.clear();
+                    self.current_comment.clear();
+                    Task::none()
+                },
+                Message::SaveNewDocument => {
+                    let mut conn = DbConnection::new();
+                    conn.new_document(
+                        self.current_document_number.clone(),
+                        self.current_document_type.clone(), 
+                        self.current_comment.clone()
+                    ).unwrap_or_else(|err| {
+                        println!("Error adding new document: {}", err);
+                        0
+                    });
+
+                    self.create_new_document = false;
+                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                    self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == conn.get_last_rowid().unwrap() as u32).cloned();
+                    let file_path = format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_id());
+                    fs::create_dir(file_path).unwrap_or_else(|err| {
+                        println!("Error creating document's attachment folder: {}", err);
+                    });
+                    self.data_changed = false;
+                    Task::none()
+                },
+                Message::OpenDocument(document) => {
+                    self.current_open_document = Some(document.clone());
+                    self.current_document_number = document.clone().get_document_number().to_string();
+                    self.current_document_type = document.clone().get_document_type().to_string();
+                    self.current_comment = document.clone().get_comment().to_string();
+                    Task::none()
+                }
+                Message::SaveCurrentDocument => {
+                    let mut conn=  DbConnection::new();
+                    let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
+                    conn.edit_document_details(
+                        current_document_id,
+                        self.current_document_number.clone(),
+                        self.current_document_type.clone(),
+                        self.current_comment.clone()
+                    ).unwrap_or_else(|err| {
+                        println!("Error editing document: {}", err);
+                        0
+                    });
+
+                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                    self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
+                    self.data_changed = false;
+                    Task::none()
+                }
+                Message::SwitchTab(tab) => {
+                    self.current_document_tab = tab;
+                    Task::none()
+                },
+                Message::CloseDocument => {
+                    self.current_open_document = None;
+                    self.current_document_number.clear();
+                    self.current_document_type.clear();
+                    self.current_comment.clear();
+                    self.data_changed = false;
+                    self.create_new_document = false;
+                    self.create_new_attachment = false;
+                    self.current_document_tab = Tab::default();
+                    String::clear(&mut self.search_text);
+                    Task::none()
+                }
+                Message::SearchTextChange(input) => {
+                    self.search_text = input;
+                    Task::none()
+                },
+                Message::Back => { Task::none() },
+                Message::None => { Task::none() },
+                Message::CurrentDocumentNumberChange(input) => {
+                    self.current_document_number = input;
+                    self.data_changed = true;
+                    Task::none()
+                },
+                Message::CurrentDocumentTypeChange(input) => {
+                    self.current_document_type = input;
+                    self.data_changed = true;
+                    Task::none()
+                },
+                Message::CurrentCommentChange(input) => {
+                    self.current_comment = input;
+                    self.data_changed = true;
+                    Task::none()
+                },
+                Message::NewAttachment => {
+                    self.create_new_attachment = true;
+                    Task::none()
+                },
+                Message::OpenFileDialog => {
+                    let previous_path = self.current_file_path.clone();
+                    self.current_file_path = Some(
+                        FileDialog::new().set_title("Select Document")
+                        .add_filter("Image (.png, .jpg, .jpeg)", &["png", "jpg", "jpeg"])
+                        .pick_file().unwrap_or_else(|| {
+                            println!("No file was selected");
+                            if self.current_file_path.is_none() {
+                                PathBuf::new()
+                            }
+                            else {
+                                PathBuf::from(self.current_file_path.as_ref().unwrap())
+                            }
+                    }).to_str().unwrap().to_string());
+                    if previous_path != self.current_file_path {
+                        println!("true");
+                        self.file_path_changed = true;
+                    }
+                    println!("{:?}", &self.current_file_path);
+                    Task::none()
+                },
+                Message::SaveNewAttachment => {
+                    let mut conn = DbConnection::new();
+                    let current_document_id = self.current_open_document.clone().unwrap().get_document_id();
+                    
+                    
+                    conn.new_attachment(String::new(), self.current_attachment_reference_number.clone(), self.current_attachment_comment.clone(), current_document_id).unwrap_or_else(|err| {
+                        println!("Error creating new attachment: {}", err);
+                        0
+                    });
+
+                    let file_format = FileFormat::from_file(self.current_file_path.as_ref().unwrap()).unwrap_or_else(|err| {
+                        println!("Error checking file format: {}", err);
+                        FileFormat::Empty
+                    });
+
+                    let file_name = format!("{}_{}.{}", current_document_id, conn.get_last_rowid().unwrap(), file_format.extension());
+
+                    let file_path = format!("./data/{}/{}", current_document_id, file_name);
+
+                    fs::copy(self.current_file_path.as_ref().unwrap(), &file_path).unwrap_or_else(|err| {
+                        println!("Error copying file to data folder: {}", err);
+                        0
+                    });
+
+                    conn.edit_attachment_file_path(conn.get_last_rowid().unwrap() as u32, file_path).unwrap_or_else(|err| {
+                        println!("Error adding file path to attachment row: {}", err);
+                        0
+                    });
+
+                    
+                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                    self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
+                    self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == conn.get_last_rowid().unwrap() as u32).cloned();
+                    self.current_attachment_reference_number = self.current_open_attachment.as_ref().unwrap().get_reference_number().to_string();
+                    self.current_attachment_comment = self.current_open_attachment.as_ref().unwrap().get_comment().to_string();
+                    self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
+                    self.create_new_attachment = false;
+                    self.data_changed = false;
+                    Task::none()
+                },
+                Message::OpenAttachment(attachment) => {
+                    self.current_open_attachment = Some(attachment.clone());
+                    self.current_attachment_reference_number = attachment.clone().get_reference_number().to_string();
+                    self.current_attachment_comment = attachment.clone().get_comment().to_string();
+                    self.current_file_path = Some(attachment.as_ref().get_file_path().to_string());
+                    Task::none()
+                },
+                Message::SaveCurrentAttachment => {
+                    let mut conn = DbConnection::new();
+                    let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
+                    let current_attachment_id = self.current_open_attachment.as_ref().unwrap().get_attachment_id();
+                    
+                    conn.edit_attachment_details(
+                        current_attachment_id,
+                        self.current_attachment_reference_number.clone(),
+                        self.current_attachment_comment.clone()
+                    ).unwrap_or_else(|err| {
+                        println!("Error editing attachment: {}", err);
+                        0
+                    });
+
+                    if self.file_path_changed {
+                        let file_format = FileFormat::from_file(self.current_file_path.as_ref().unwrap()).unwrap_or_else(|err| {
+                            println!("Error checking file format: {}", err);
+                            FileFormat::Empty
+                        });
+
+                        let file_name = format!("{}_{}.{}", current_document_id, current_attachment_id, file_format.extension());
+
+                        let file_path = format!("./data/{}/{}", current_document_id, file_name);
+
+                        fs::copy(self.current_file_path.as_ref().unwrap(), &file_path).unwrap_or_else(|err| {
+                            println!("Error copying file to data folder: {}", err);
+                            0
+                        });
+
+                        conn.edit_attachment_file_path(current_attachment_id, file_path).unwrap_or_else(|err| {
+                            println!("Error editing attachment file path: {}", err);
+                            0
+                        });
+
+                        self.file_path_changed = false;
+                    }
+
+                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                    self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
+                    self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == current_attachment_id).cloned();
+                    self.data_changed = false;
+                    Task::none()
+                },
+                Message::CurrentAttachmentReferenceNumberChange(input) => {
+                    self.current_attachment_reference_number = input;
+                    self.data_changed = true;
+                    Task::none()
+                },
+                Message::CurrentAttachmentCommentChange(input) => {
+                    self.current_attachment_comment = input;
+                    self.data_changed = true;
+                    Task::none()
+                },
+                Message::CloseAttachment => {
+                    self.current_open_attachment = None;
+                    self.current_attachment_reference_number.clear(); 
+                    self.current_attachment_comment.clear();
+                    self.data_changed = false;
+                    self.file_path_changed = false;
+                    self.current_file_path = None;
+                    Task::none()
+                },
+                Message::KeyEvent(key) => {
+                    match key {
+                        keyboard::Key::Named(key::Named::Tab) => {
+                            println!("Tab pressed");
+                            focus_next()
+                        }
+
+                        _ => Task::none()
+                    }
+                }
+            }
+        }
+
+
+        pub(crate) fn view(&self) -> Element<Message> {
+            let test_linear = Linear {
+                stops: [
+                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(1.0, 0.0, 0.0)}),
+                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(1.0, 0.0, 0.0)}),
+                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(1.0, 0.0, 0.0)}),
+                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(1.0, 0.0, 0.0)}),
+                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(0.0, 0.0, 1.0)}),
+                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(0.0, 0.0, 1.0)}),
+                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(0.0, 0.0, 1.0)}),
+                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(0.0, 0.0, 1.0)}),
+                ],
+                angle: 30.into(),
+            };
+
+            let test_gradient = Gradient::Linear(test_linear);
+            let test_background = Background::Gradient(test_gradient);
+            let test_style = Style {background: Some(test_background), text_color: None, border: Border::default(), shadow: Shadow::default() };
+
+            //let mut document_cards: Vec<MouseArea<'static, Message>> = Vec::new();
+            let mut document_cards: Vec<DataCard> = Vec::new();
+
+            for document in &self.documents {
+                document_cards.push(DataCard::new(Some(document.clone()), None));
+            }
+
+            for card in document_cards.iter() {
+                
+            }
+            
+            match &self.current_open_document {
+                None => {
+                    match self.create_new_document {
+                        // New Document Screen
+                        true => {
+                            Container::new(column![
+                                Container::new(row![
+                                    button("<").on_press(Message::CloseDocument),
+                                    button("Save").on_press(Message::SaveNewDocument)
+                                ].spacing(5)).width(Length::Fill).padding(5).style(container::rounded_box),
+                                row![
+                                    Text::new("New Document").size(20).align_y(Center)
+                                ].spacing(5).align_y(Center),
+                                horizontal_rule(2),
+                                row![
+                                    Text::new("Document Number: ").width(Length::FillPortion(1)), 
+                                    text_input("", &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).id(self.input1_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
+                                ].spacing(5).align_y(Center),
+                                row![
+                                    Text::new("Document Type: ").width(Length::FillPortion(1)), 
+                                    text_input("", &self.current_document_type).on_input(Message::CurrentDocumentTypeChange).id(self.input2_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
+                                ].spacing(5).align_y(Center),
+                                row![
+                                    Text::new("Comment: ").width(Length::FillPortion(1)), 
+                                    text_input("", &self.current_comment).on_input(Message::CurrentCommentChange).id(self.input3_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
+                                ].spacing(5).align_y(Center)
+                            ].spacing(5)
+                            ).height(Length::Fill).width(Length::Fill).padding(5).into()
+                        }
+                        // Main Document List Screen
+                        false => {
+                            Container::new(column![
+                                Container::new(row![
+                                        button("<").on_press(Message::Back),
+                                        button("New").on_press(Message::NewDocument),
+                                        button("Delete")
+                                ].spacing(5)).width(Length::Fill).padding(5).style(container::rounded_box),
+                                row![
+                                    Text::new("Documents").align_y(Center).size(20),
+                                    Space::new(Length::Fill, Length::Shrink),
+                                    text_input("Search", &self.search_text).on_input(Message::SearchTextChange),
+                                ].spacing(5),
+                                horizontal_rule(2),
+                                row(
+                                    document_cards.into_iter().filter(|card| {
+                                        card.get_document().get_document_number().to_string().to_lowercase().contains(&self.search_text.to_lowercase()) ||
+                                        card.get_document().get_document_type().to_string().to_lowercase().contains(&self.search_text.to_lowercase()) ||
+                                        card.get_document().get_comment().to_string().to_lowercase().contains(&self.search_text.to_lowercase())
+                                        
+                                    }).map(|card| {
+                                        card.new_document_card().into()
+                                    }) 
+                                ).spacing(10).wrap(),
+                            ].spacing(5)
+                            ).width(Length::Fill).height(Length::Fill).padding(5).into()
+                        }
+                    }
+                }
+
+                Some(document) => {
+                    Container::new(column![
+                        match self.current_document_tab {
+                            // Document Details Screen
+                            Tab::Details => {
+                                Container::new(column![
+                                    Container::new(row![
+                                        button("<").on_press(Message::CloseDocument),
+                                        if self.data_changed {
+                                            button("Save").on_press(Message::SaveCurrentDocument)
+                                        }
+                                        else {
+                                            button("Save")
+                                        }
+                                    ].spacing(5)).width(Length::Fill).padding(5).style(container::rounded_box),
+                                    row![
+                                        Text::new("Document Details").size(20).align_y(Center)
+                                    ].spacing(5).align_y(Center),
+                                    horizontal_rule(2),
+                                    row![
+                                        Text::new("Document Number: ").width(Length::FillPortion(1)), 
+                                        text_input(&document.get_document_number().to_string(), &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).width(Length::FillPortion(4))
+                                    ].spacing(5).align_y(Center),
+                                    row![
+                                        Text::new("Document Type: ").width(Length::FillPortion(1)), 
+                                        text_input(&document.get_document_type().to_string(), &self.current_document_type).on_input(Message::CurrentDocumentTypeChange).width(Length::FillPortion(4))
+                                    ].spacing(5).align_y(Center),
+                                    row![
+                                        Text::new("Comment: ").width(Length::FillPortion(1)), 
+                                        text_input(&document.get_comment().to_string(), &self.current_comment).on_input(Message::CurrentCommentChange).width(Length::FillPortion(4))
+                                    ].spacing(5).align_y(Center)
+                                ].spacing(5)
+                                ).height(Length::Fill).width(Length::Fill)
+                            },
+                            Tab::Attachments => {
+                                let mut attachment_cards: Vec<DataCard> = Vec::new();
+
+                                for attachment in &self.current_open_document.as_ref().unwrap().get_attachments().unwrap() {
+                                    attachment_cards.push(DataCard::new(None, Some(attachment.clone())));
+                                }
+                                match &self.current_open_attachment {
+                                    None => {
+                                        match self.create_new_attachment {
+                                            // New Attachment Screen
+                                            true => {
+                                                Container::new(column![
+                                                    Container::new(row![
+                                                        button("<").on_press(Message::CloseDocument),
+                                                        button("Save").on_press(Message::SaveNewAttachment)
+                                                    ].spacing(5)).width(Length::Fill).padding(5).style(container::rounded_box),
+                                                    row![
+                                                        Text::new("New Attachment").size(20).align_y(Center)
+                                                    ].spacing(5).align_y(Center),
+                                                    horizontal_rule(2),
+                                                    row![
+                                                        Text::new("Attachment Number: ").width(Length::FillPortion(1)), 
+                                                        text_input("", &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).width(Length::FillPortion(4))
+                                                    ].spacing(5).align_y(Center),
+                                                    row![
+                                                        Text::new("Comment: ").width(Length::FillPortion(1)), 
+                                                        text_input("", &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange).width(Length::FillPortion(4))
+                                                    ].spacing(5).align_y(Center),
+                                                    row![
+                                                        Text::new("File: ").width(Length::FillPortion(1)),
+                                                        row![
+                                                            text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
+                                                                println!("No currently selected file.");
+                                                                String::from("")
+                                                            })),
+                                                            button("Select").on_press(Message::OpenFileDialog)
+                                                        ].spacing(5).width(Length::FillPortion(4)).align_y(Center)
+                                                    ].spacing(5),
+                                                ].spacing(5)
+                                                ).width(Length::Fill).height(Length::Fill)
+                                            },
+                                            // Attachment List Screen
+                                            false => {
+                                                Container::new(column![
+                                                    Container::new(row![
+                                                        button("<").on_press(Message::CloseDocument),
+                                                        button("New").on_press(Message::NewAttachment)
+                                                    ].spacing(5)).width(Length::Fill).padding(5).style(container::rounded_box),
+                                                    row![
+                                                        Text::new("Attachments").size(20).align_y(Center),
+                                                        Space::new(Length::Fill, Length::Shrink),
+                                                        text_input("Search", &self.search_text).on_input(Message::SearchTextChange)
+                                                    ],
+                                                    horizontal_rule(2),
+                                                    row(attachment_cards.into_iter().filter(|card| {
+                                                        card.get_attachment().get_reference_number().to_string().to_lowercase().contains(&self.search_text) ||
+                                                        card.get_attachment().get_comment().to_string().to_lowercase().contains(&self.search_text)
+                                                    }).map(|card| {
+                                                        card.new_attachment_card().into()
+                                                    })).spacing(10).wrap(),
+                                                ].spacing(5)
+                                                ).width(Length::Fill).height(Length::Fill)
+                                            }
+                                        }
+                                    },
+                                    // Attachment Details Screen
+                                    Some(attachment) => {
+                                        Container::new(column![
+                                            Container::new(row![
+                                                button("<").on_press(Message::CloseAttachment),
+                                                if self.data_changed || self.file_path_changed {
+                                                    button("Save").on_press(Message::SaveCurrentAttachment)
+                                                }
+                                                else {
+                                                    button("Save")
+                                                }
+                                            ].spacing(5)).width(Length::Fill).padding(5).style(container::rounded_box),
+                                            row![
+                                                Text::new("Attachment Details").size(20).align_y(Center)
+                                            ].spacing(5).align_y(Center),
+                                            horizontal_rule(2),
+                                            row![
+                                                column![
+                                                    Text::new("Attachment Number: "), 
+                                                    text_input(&attachment.get_reference_number().to_string(), &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange),
+                                                    Text::new("Comment: "), 
+                                                    text_input(&attachment.get_comment().to_string(), &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange),
+                                                    Text::new("File: "),
+                                                    row![
+                                                        text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
+                                                            println!("No currently selected file.");
+                                                            String::new()
+                                                        })),
+                                                        button("Select").on_press(Message::OpenFileDialog)
+                                                    ].spacing(5).width(Length::FillPortion(4))
+                                                ].width(Length::FillPortion(1)),
+                                                vertical_rule(2),
+                                                Viewer::new(self.current_file_path.as_ref().unwrap()).width(Length::FillPortion(3)).height(Length::Fill)
+                                            ].spacing(5),
+                                        ].spacing(5)
+                                        ).height(Length::Fill).width(Length::Fill)
+                                    }
+                                }
+                            },
+                        },
+                        // Navigation Tabs between Document details and attachments
+                        Tabs::new(Message::SwitchTab)
+                            .push(Tab::Details, TabLabel::Text(String::from("Details")), Text::new(String::from("Details")))
+                            .push(Tab::Attachments, TabLabel::Text(String::from("Attachments")), Text::new(String::from("Attachments")))
+                            .tab_bar_position(TabBarPosition::Bottom)
+                            .set_active_tab(&self.current_document_tab)
+                    ].spacing(5)).padding(5).into()
+                }
+            }
+        }
+
+        pub(crate) fn subscription(&self) -> Subscription<Message> {
+            keyboard::on_key_press(|key, modifiers| {
+                Some(Message::KeyEvent(key))
+            })
+        }
+    }
+
+    struct DataCard {
+        document: Option<Arc<Document>>,
+        attachment: Option<Arc<Attachment>>
+    }
+
+    impl DataCard {
+        fn new(document: Option<Arc<Document>>, attachment: Option<Arc<Attachment>>) -> DataCard {
+            DataCard {
+                document: document,
+                attachment: attachment
+            }
+        }
+
+        fn new_document_card(&self) -> MouseArea<'static, Message> {
+            let datetime_format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+            let datetime = Result::expect (
+                Result::expect (
+                    UtcDateTime::from_unix_timestamp(self.document.as_ref().unwrap().get_date_added()),
+                    "Error retrieving data from Document.").to_offset(OffsetDateTime::now_local().expect("Failed to acquire local offset.").offset())
+            .format(datetime_format),
+            "Error converting unix epoch to UtcDateTime");
+
+            mouse_area(
+                Card::new(Text::new(self.document.as_ref().unwrap().get_document_number().to_string()), column![
+                    Text::new(self.document.as_ref().unwrap().get_document_type().to_string()),
+                    Text::new(self.document.as_ref().unwrap().get_comment().to_string())
+                ]).max_height(500.0).max_width(200.0).foot(Text::new(datetime))
+            ).on_press(Message::OpenDocument(self.document.as_ref().unwrap().clone())).interaction(Interaction::Pointer)
+        }
+
+        fn new_attachment_card(&self) -> MouseArea<'static, Message> {
+            let datetime_format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+            let datetime = Result::expect (
+                Result::expect (
+                    UtcDateTime::from_unix_timestamp(self.attachment.as_ref().unwrap().get_date_added()),
+                    "Error retrieving data from Attachment.").to_offset(OffsetDateTime::now_local().expect("Failed to acquire local offset.").offset())
+            .format(datetime_format),
+            "Error converting unix epoch to UtcDateTime");
+
+            mouse_area(
+                Card::new(Text::new(self.attachment.as_ref().unwrap().get_reference_number().to_string()), column![
+                    Text::new(self.attachment.as_ref().unwrap().get_comment().to_string())
+                ]).max_height(500.0).max_width(200.0).foot(Text::new(datetime))
+            ).on_press(Message::OpenAttachment(self.attachment.as_ref().unwrap().clone())).interaction(Interaction::Pointer)
+        }
+
+        pub(crate) fn get_document(&self) -> Arc<Document> {
+            return self.document.as_ref().unwrap().clone()
+        }
+
+        pub(crate) fn get_attachment(&self) -> Arc<Attachment> {
+            return self.attachment.as_ref().unwrap().clone()
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub(crate) enum Message {
+        NewDocument,
+        OpenDocument(Arc<Document>),
+        CurrentDocumentNumberChange(String),
+        CurrentDocumentTypeChange(String),
+        CurrentCommentChange(String),
+        SaveCurrentDocument,
+        SaveNewDocument,
+        SwitchTab(Tab),
+        CloseDocument,
+        NewAttachment,
+        SaveNewAttachment,
+        OpenAttachment(Arc<Attachment>),
+        SaveCurrentAttachment,
+        CurrentAttachmentReferenceNumberChange(String),
+        CurrentAttachmentCommentChange(String),
+        CloseAttachment,
+        SearchTextChange(String),
+        OpenFileDialog,
+        Back,
+        KeyEvent(Key),
+        None,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Default)]
+    pub(crate) enum Tab {
+        #[default]
+        Details,
+        Attachments,
+    }
+
+    pub(crate) enum ActiveInput {
+        Input1,
+        Input2,
+        Input3
+    }
+}

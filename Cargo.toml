@@ -1,0 +1,17 @@
+[package]
+name = "doc_manager"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+derivative = "2.2.0"
+features = "0.10.0"
+file-format = "0.28.0"
+iced = { version = "0.13.1", features = ["advanced", "image", "multi-window", "system"] }
+iced-multi-window = "2.0.0"
+iced_aw = { version = "0.12.2", features = ["menu", "sidebar", "tab_bar"] }
+iced_table = "0.13.0"
+image = "0.25.9"
+rfd = "0.16.0"
+rusqlite = "0.37.0"
+time = { version = "0.3.44", features = ["formatting", "local-offset", "macros", "parsing"] }
