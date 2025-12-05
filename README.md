@@ -1,2 +1,2 @@
 # doc_manager
-Simple Document Manager
+A simple document manager.
