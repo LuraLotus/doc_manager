@@ -3,7 +3,6 @@ pub(crate) mod document {
 
     use crate::screen::attachment::attachment::Attachment;
     use iced::{Element, widget::Container};
-    use time::PrimitiveDateTime;
 
     #[derive(Debug, Clone)]
     pub(crate) struct Document {

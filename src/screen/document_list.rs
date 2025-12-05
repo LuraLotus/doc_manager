@@ -1,15 +1,14 @@
 pub(crate) mod document_list {
-    use std::{default, f32::MAX, fs, path::PathBuf, sync::Arc, thread::current};
+    use std::{fs, path::PathBuf, sync::Arc};
 
-    use derivative::Derivative;
     use file_format::FileFormat;
-    use iced::{Alignment::Center, Background, Border, Color, ContentFit, Element, Gradient, Length, Shadow, Subscription, Task, advanced::widget::{Operation, operation::{self, focusable}}, event::{self, Event}, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, widget::{Container, MouseArea, Space, Text, TextInput, button, column, container::{self, Style}, focus_next, focus_previous, horizontal_rule, image::{self, Viewer, viewer}, text_input, mouse_area, row, text_input::{Id}, vertical_rule}};
+    use iced::{Alignment::Center, Background, Border, Color, Element, Gradient, Length, Shadow, Subscription, Task, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, widget::{Container, MouseArea, Space, Text, button, column, container::{self, Style}, focus_next, horizontal_rule, image::{Handle, Viewer}, mouse_area, row, text_input::Id, vertical_rule}};
+    use iced::widget::text_input;
     use iced_aw::{Card, TabBarPosition, TabLabel, Tabs};
-    use iced_table::{Table, table, table::Column};
     use rfd::FileDialog;
-    use time::{OffsetDateTime, PrimitiveDateTime, UtcDateTime, format_description, macros::{format_description, offset}};
+    use time::{OffsetDateTime, UtcDateTime, macros::format_description};
 
-    use crate::{db::db_module::DbConnection, screen::{Attachment, Document, document}};
+    use crate::{db::db_module::DbConnection, screen::{Attachment, Document}};
 
     #[derive(Debug, Clone, Default)]
     pub(crate) struct DocumentList {
@@ -27,6 +26,7 @@ pub(crate) mod document_list {
         create_new_document: bool,
         create_new_attachment: bool,
         current_file_path: Option<String>,
+        current_file: Option<Handle>,
         file_path_changed: bool,
         input1_id: Option<Id>,
         input2_id: Option<Id>,
@@ -50,6 +50,7 @@ pub(crate) mod document_list {
                 create_new_document: false,
                 create_new_attachment: false,
                 current_file_path: None,
+                current_file: None,
                 file_path_changed: false,
                 input1_id: Some(Id::new("1")),
                 input2_id: Some(Id::new("2")),
@@ -157,7 +158,7 @@ pub(crate) mod document_list {
                     let previous_path = self.current_file_path.clone();
                     self.current_file_path = Some(
                         FileDialog::new().set_title("Select Document")
-                        .add_filter("Image (.png, .jpg, .jpeg)", &["png", "jpg", "jpeg"])
+                        .add_filter("Image (.png, .jpg, .jpeg, .webp)", &["png", "jpg", "jpeg", "webp"])
                         .pick_file().unwrap_or_else(|| {
                             println!("No file was selected");
                             if self.current_file_path.is_none() {
@@ -170,6 +171,7 @@ pub(crate) mod document_list {
                     if previous_path != self.current_file_path {
                         println!("true");
                         self.file_path_changed = true;
+                        self.current_file = Some(Handle::from_bytes(fs::read(self.current_file_path.as_ref().unwrap()).unwrap()))
                     }
                     println!("{:?}", &self.current_file_path);
                     Task::none()
@@ -213,12 +215,24 @@ pub(crate) mod document_list {
                     self.create_new_attachment = false;
                     self.data_changed = false;
                     Task::none()
+                    
                 },
                 Message::OpenAttachment(attachment) => {
                     self.current_open_attachment = Some(attachment.clone());
                     self.current_attachment_reference_number = attachment.clone().get_reference_number().to_string();
                     self.current_attachment_comment = attachment.clone().get_comment().to_string();
                     self.current_file_path = Some(attachment.as_ref().get_file_path().to_string());
+                    if let Some(file_path) = &self.current_file_path {
+                        match fs::read(file_path) {
+                            Ok(bytes) => {
+                                self.current_file = Some(Handle::from_bytes(bytes));
+                            }
+                            Err(err) => {
+                                println!("Error reading file: {}", err);
+                                self.current_file = Some(Handle::from_path("src/ferris-error-handling.webp"));
+                            }
+                        }
+                    }
                     Task::none()
                 },
                 Message::SaveCurrentAttachment => {
@@ -241,9 +255,14 @@ pub(crate) mod document_list {
                             FileFormat::Empty
                         });
 
+
                         let file_name = format!("{}_{}.{}", current_document_id, current_attachment_id, file_format.extension());
 
                         let file_path = format!("./data/{}/{}", current_document_id, file_name);
+
+                        fs::remove_file(self.current_open_attachment.as_ref().unwrap().clone().get_file_path().to_string()).unwrap_or_else(|err| {
+                            println!("Error deleting old file: {}", err);
+                        });
 
                         fs::copy(self.current_file_path.as_ref().unwrap(), &file_path).unwrap_or_else(|err| {
                             println!("Error copying file to data folder: {}", err);
@@ -261,6 +280,7 @@ pub(crate) mod document_list {
                     self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
                     self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
                     self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == current_attachment_id).cloned();
+                    self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
                     self.data_changed = false;
                     Task::none()
                 },
@@ -281,12 +301,12 @@ pub(crate) mod document_list {
                     self.data_changed = false;
                     self.file_path_changed = false;
                     self.current_file_path = None;
+                    self.current_file = None;
                     Task::none()
                 },
                 Message::KeyEvent(key) => {
                     match key {
                         keyboard::Key::Named(key::Named::Tab) => {
-                            println!("Tab pressed");
                             focus_next()
                         }
 
@@ -367,7 +387,7 @@ pub(crate) mod document_list {
                                 row![
                                     Text::new("Documents").align_y(Center).size(20),
                                     Space::new(Length::Fill, Length::Shrink),
-                                    text_input("Search", &self.search_text).on_input(Message::SearchTextChange),
+                                    text_input("Search", &self.search_text).on_input(Message::SearchTextChange).id(Id::new("search")),
                                 ].spacing(5),
                                 horizontal_rule(2),
                                 row(
@@ -402,20 +422,20 @@ pub(crate) mod document_list {
                                         }
                                     ].spacing(5)).width(Length::Fill).padding(5).style(container::rounded_box),
                                     row![
-                                        Text::new("Document Details").size(20).align_y(Center)
+                                        Text::new(format!("Document - {}", self.current_document_number),).size(20).align_y(Center)
                                     ].spacing(5).align_y(Center),
                                     horizontal_rule(2),
                                     row![
                                         Text::new("Document Number: ").width(Length::FillPortion(1)), 
-                                        text_input(&document.get_document_number().to_string(), &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).width(Length::FillPortion(4))
+                                        text_input(&document.get_document_number().to_string(), &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).width(Length::FillPortion(4)).id(self.input1_id.as_ref().unwrap().clone())
                                     ].spacing(5).align_y(Center),
                                     row![
                                         Text::new("Document Type: ").width(Length::FillPortion(1)), 
-                                        text_input(&document.get_document_type().to_string(), &self.current_document_type).on_input(Message::CurrentDocumentTypeChange).width(Length::FillPortion(4))
+                                        text_input(&document.get_document_type().to_string(), &self.current_document_type).on_input(Message::CurrentDocumentTypeChange).width(Length::FillPortion(4)).id(self.input2_id.as_ref().unwrap().clone())
                                     ].spacing(5).align_y(Center),
                                     row![
                                         Text::new("Comment: ").width(Length::FillPortion(1)), 
-                                        text_input(&document.get_comment().to_string(), &self.current_comment).on_input(Message::CurrentCommentChange).width(Length::FillPortion(4))
+                                        text_input(&document.get_comment().to_string(), &self.current_comment).on_input(Message::CurrentCommentChange).width(Length::FillPortion(4)).id(self.input3_id.as_ref().unwrap().clone())
                                     ].spacing(5).align_y(Center)
                                 ].spacing(5)
                                 ).height(Length::Fill).width(Length::Fill)
@@ -441,22 +461,22 @@ pub(crate) mod document_list {
                                                     ].spacing(5).align_y(Center),
                                                     horizontal_rule(2),
                                                     row![
-                                                        Text::new("Attachment Number: ").width(Length::FillPortion(1)), 
-                                                        text_input("", &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).width(Length::FillPortion(4))
-                                                    ].spacing(5).align_y(Center),
-                                                    row![
-                                                        Text::new("Comment: ").width(Length::FillPortion(1)), 
-                                                        text_input("", &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange).width(Length::FillPortion(4))
-                                                    ].spacing(5).align_y(Center),
-                                                    row![
-                                                        Text::new("File: ").width(Length::FillPortion(1)),
-                                                        row![
-                                                            text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
-                                                                println!("No currently selected file.");
-                                                                String::from("")
-                                                            })),
-                                                            button("Select").on_press(Message::OpenFileDialog)
-                                                        ].spacing(5).width(Length::FillPortion(4)).align_y(Center)
+                                                        column![
+                                                            Text::new("Attachment Number: "), 
+                                                            text_input("", &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).id(self.input1_id.as_ref().unwrap().clone()),
+                                                            Text::new("Comment: "), 
+                                                            text_input("", &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange).id(self.input2_id.as_ref().unwrap().clone()),
+                                                            Text::new("File: "),
+                                                            row![
+                                                                text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
+                                                                    println!("No currently selected file.");
+                                                                    String::new()
+                                                                })),
+                                                                button("Select").on_press(Message::OpenFileDialog)
+                                                            ].spacing(5).width(Length::FillPortion(4))
+                                                        ].width(Length::FillPortion(1)),
+                                                        vertical_rule(2),
+                                                        Viewer::new(self.current_file.as_ref().unwrap()).width(Length::FillPortion(3)).height(Length::Fill)
                                                     ].spacing(5),
                                                 ].spacing(5)
                                                 ).width(Length::Fill).height(Length::Fill)
@@ -471,7 +491,7 @@ pub(crate) mod document_list {
                                                     row![
                                                         Text::new("Attachments").size(20).align_y(Center),
                                                         Space::new(Length::Fill, Length::Shrink),
-                                                        text_input("Search", &self.search_text).on_input(Message::SearchTextChange)
+                                                        text_input("Search", &self.search_text).on_input(Message::SearchTextChange).id(Id::new("search"))
                                                     ],
                                                     horizontal_rule(2),
                                                     row(attachment_cards.into_iter().filter(|card| {
@@ -498,15 +518,15 @@ pub(crate) mod document_list {
                                                 }
                                             ].spacing(5)).width(Length::Fill).padding(5).style(container::rounded_box),
                                             row![
-                                                Text::new("Attachment Details").size(20).align_y(Center)
+                                                Text::new(format!("Attachment - {}", self.current_attachment_reference_number)).size(20).align_y(Center)
                                             ].spacing(5).align_y(Center),
                                             horizontal_rule(2),
                                             row![
                                                 column![
                                                     Text::new("Attachment Number: "), 
-                                                    text_input(&attachment.get_reference_number().to_string(), &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange),
+                                                    text_input(&attachment.get_reference_number().to_string(), &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).id(self.input1_id.as_ref().unwrap().clone()),
                                                     Text::new("Comment: "), 
-                                                    text_input(&attachment.get_comment().to_string(), &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange),
+                                                    text_input(&attachment.get_comment().to_string(), &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange).id(self.input2_id.as_ref().unwrap().clone()),
                                                     Text::new("File: "),
                                                     row![
                                                         text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
@@ -517,7 +537,10 @@ pub(crate) mod document_list {
                                                     ].spacing(5).width(Length::FillPortion(4))
                                                 ].width(Length::FillPortion(1)),
                                                 vertical_rule(2),
-                                                Viewer::new(self.current_file_path.as_ref().unwrap()).width(Length::FillPortion(3)).height(Length::Fill)
+                                                Viewer::new(self.current_file.clone().unwrap_or_else(|| {
+                                                    println!("Error displaying image.");
+                                                    Handle::from_path("src/ferris-error-handling.webp")
+                                                })).width(Length::FillPortion(3)).height(Length::Fill)
                                             ].spacing(5),
                                         ].spacing(5)
                                         ).height(Length::Fill).width(Length::Fill)

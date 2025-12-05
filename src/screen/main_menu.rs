@@ -1,6 +1,5 @@
 pub(crate) mod main_menu {
-    use iced::{Element, Event, Length, Subscription, keyboard, widget::{Container, button, column, container, row, text}};
-    use iced_aw::{sidebar::TabLabel, widget::Sidebar};
+    use iced::{Element, Event, Length, Task, widget::{Container, button, column, container, row, text}};
 
     #[derive(Default, Debug, Clone)]
     pub(crate) struct MainMenu;
@@ -9,12 +8,12 @@ pub(crate) mod main_menu {
         pub(crate) fn new() -> MainMenu {
             MainMenu
         }
-        pub(crate) fn update(&mut self, message: Message) {
+        pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
             match message {
-                Message::ToDocumentList => {},
+                Message::ToDocumentList => Task::none(),
                 Message::NewDocument => todo!(),
-                Message::KeyEvent(event) => {},
-                Message::None => {},
+                Message::KeyEvent(event) => Task::none(),
+                Message::None => Task::none(),
             }
         }
 

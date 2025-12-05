@@ -1,17 +1,14 @@
 mod db;
 mod screen;
 
-use db::db_module::DbConnection;
-use iced::advanced::graphics::text::cosmic_text::Command;
-use iced::{Application, Element, Event, Length, Subscription, Task, Theme, event, keyboard};
-use iced::widget::{Container, button, column, container, row, text, text_input};
+use iced::{Element, Subscription, Task, Theme};
+use iced::widget::{Container, container, row};
 use iced_aw::sidebar::TabLabel;
 use iced_aw::widget::Sidebar;
-use rusqlite::Connection;
 use screen::main_menu::main_menu;
 use screen::document_list::document_list;
 
-use crate::screen::{Document, MainMenu, document};
+use crate::screen::MainMenu;
 use crate::screen::DocumentList;
 
 
@@ -38,21 +35,7 @@ enum Message {
         DocumentList,
     }
 
-#[derive(Debug, Clone)]
-enum Screen {
-    MainMenu(screen::MainMenu),
-    DocumentList(screen::DocumentList),
-}
-
-impl Default for Screen {
-    fn default() -> Self {
-        Screen::MainMenu(screen::MainMenu)
-    }
-}
-
-#[derive(Default)]
 struct State {
-    current_screen: Screen,
     current_tab: Tab,
     main_menu: MainMenu,
     document_list: DocumentList,
@@ -63,7 +46,6 @@ struct State {
 impl State {
     fn new() -> State {
         State {
-            current_screen: Screen::default(),
             current_tab: Tab::default(),
             main_menu: MainMenu::new(),
             document_list: DocumentList::new(),
@@ -78,19 +60,16 @@ impl State {
                 match tab {
                     Tab::Home => {
                         self.current_tab = tab;
-                        self.current_screen = Screen::MainMenu(screen::MainMenu::new());
                     },
                     Tab::DocumentList => {
                         self.current_tab = tab;
-                        self.current_screen = Screen::DocumentList(screen::DocumentList::new());
                     },
                 }
             },
             Message::MainMenu(main_menu_message) => {
                 match main_menu_message {
                     _ => {
-                        let Screen::MainMenu(screen) = &mut self.current_screen else { return Task::none(); };
-                        screen.update(main_menu_message);
+                        return self.main_menu.update(main_menu_message).map(Message::MainMenu)
                     }
                 }
             },
@@ -98,11 +77,10 @@ impl State {
                 match document_list_message {
                     document_list::Message::Back => {
                         self.current_tab = Tab::Home;
-                        self.current_screen = Screen::MainMenu(screen::MainMenu::new());
                     }
                     _ => {
-                        let Screen::DocumentList(screen) = &mut self.current_screen else { return Task::none(); };
-                        let _ = screen.update(document_list_message);
+                        //let Screen::DocumentList(screen) = &mut self.current_screen else { return Task::none(); };
+                        return self.document_list.update(document_list_message).map(Message::DocumentList)
                     }
                 }
             },
@@ -111,9 +89,9 @@ impl State {
     }
 
     fn view(&self) -> Element<Message> {
-        let screen = match &self.current_screen {
-            Screen::MainMenu(main_menu) => main_menu.view().map(Message::MainMenu),
-            Screen::DocumentList(document_list) => document_list.view().map(Message::DocumentList),
+        let screen = match &self.current_tab {
+            Tab::Home => self.main_menu.view().map(Message::MainMenu),
+            Tab::DocumentList => self.document_list.view().map(Message::DocumentList),
         };
         Container::new(row![
             Sidebar::new(Message::SelectedTab)
@@ -126,14 +104,19 @@ impl State {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        match &self.current_screen {
-            Screen::DocumentList(document_list) => {
-                document_list.subscription().map(Message::DocumentList)
+        match &self.current_tab {
+            Tab::DocumentList => {
+                self.document_list.subscription().map(Message::DocumentList)
             }
-            Screen::MainMenu(main_menu) => {
+            Tab::Home => {
                 Subscription::none()
             },
         }
     }
+}
 
+impl Default for State {
+    fn default() -> Self {
+        State::new()
+    }
 }

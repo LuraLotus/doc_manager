@@ -1,13 +1,10 @@
 pub(crate) mod db_module {
-    use std::error::Error;
     use std::fs;
     use std::path::Path;
     use std::sync::Arc;
 
     use rusqlite::Connection;
     use rusqlite::Result;
-    use rusqlite::Statement;
-    use time::PrimitiveDateTime;
 
     use crate::screen::Attachment;
     use crate::screen::Document;

@@ -1,8 +1,6 @@
 pub(crate) mod attachment {
     use std::sync::Arc;
 
-    use image::{DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageReader, ImageResult, Pixel, Rgb};
-    use time::PrimitiveDateTime;
 
     #[derive(Debug, Clone)]
     pub(crate) struct Attachment {
