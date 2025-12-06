@@ -337,25 +337,23 @@ pub(crate) mod document_list {
                     if let Some(parent) = temp_path.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
-                    let temp_path_clone = temp_path.clone();
 
                     return Task::perform(
                         async move {
                             let script = format!(r#"
-                            $out = '{}';
-                            $d = New-Object -ComObject WIA.CommonDialog;
-                            $img = $d.ShowAcquireImage();
-                            if ($img -ne $null) {{ 
-                                $img.SaveFile($out); 
-                                Write-Output $out;
-                                Read-Host -Prompt 'Press enter to continue';
-                                exit 0
-                            }}
-                            else {{ 
-                                exit 1
-                            }}
-                            "#,
-                            temp_path.to_string_lossy()
+                                $out = '{}';
+                                $d = New-Object -ComObject WIA.CommonDialog;
+                                $img = $d.ShowAcquireImage();
+                                if ($img -ne $null) {{ 
+                                    $img.SaveFile($out); 
+                                    Write-Output $out;
+                                    exit 0
+                                }}
+                                else {{ 
+                                    exit 1
+                                }}
+                                "#,
+                                temp_path.to_string_lossy()
                             );
 
                             let output = std::process::Command::new("powershell.exe")
