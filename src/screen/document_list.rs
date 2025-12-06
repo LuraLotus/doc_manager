@@ -1,5 +1,5 @@
 pub(crate) mod document_list {
-    use std::{fs, path::PathBuf, sync::Arc};
+    use std::{fs, path::PathBuf, process::Stdio, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
     use file_format::FileFormat;
     use iced::{Alignment::Center, Background, Border, Color, Element, Gradient, Length, Shadow, Subscription, Task, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, widget::{Container, MouseArea, Space, Text, button, column, container::{self, Style}, focus_next, horizontal_rule, image::{Handle, Viewer}, mouse_area, row, text_input::Id, vertical_rule}};
@@ -27,6 +27,8 @@ pub(crate) mod document_list {
         create_new_attachment: bool,
         current_file_path: Option<String>,
         current_file: Option<Handle>,
+        current_file_bytes: Option<Vec<u8>>,
+        file_scanned: bool,
         file_path_changed: bool,
         input1_id: Option<Id>,
         input2_id: Option<Id>,
@@ -51,6 +53,8 @@ pub(crate) mod document_list {
                 create_new_attachment: false,
                 current_file_path: None,
                 current_file: None,
+                current_file_bytes: None,
+                file_scanned: false,
                 file_path_changed: false,
                 input1_id: Some(Id::new("1")),
                 input2_id: Some(Id::new("2")),
@@ -195,23 +199,26 @@ pub(crate) mod document_list {
 
                     let file_path = format!("./data/{}/{}", current_document_id, file_name);
 
-                    fs::copy(self.current_file_path.as_ref().unwrap(), &file_path).unwrap_or_else(|err| {
-                        println!("Error copying file to data folder: {}", err);
-                        0
-                    });
-
-                    conn.edit_attachment_file_path(conn.get_last_rowid().unwrap() as u32, file_path).unwrap_or_else(|err| {
-                        println!("Error adding file path to attachment row: {}", err);
-                        0
-                    });
-
-                    
+                    if self.file_scanned {
+                        fs::write(file_path.clone(), self.current_file_bytes.as_ref().unwrap()).unwrap_or_else(|err| {
+                            println!("Error writing bytes to file: {}", err);
+                        });
+                    }
+                    else {
+                        fs::copy(self.current_file_path.as_ref().unwrap(), &file_path).unwrap_or_else(|err| {
+                            println!("Error copying file to data folder: {}", err);
+                            0
+                        });
+                    }
+ 
                     self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
                     self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
                     self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == conn.get_last_rowid().unwrap() as u32).cloned();
                     self.current_attachment_reference_number = self.current_open_attachment.as_ref().unwrap().get_reference_number().to_string();
                     self.current_attachment_comment = self.current_open_attachment.as_ref().unwrap().get_comment().to_string();
                     self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
+                    self.file_scanned = false;
+                    self.current_file_bytes = None;
                     self.create_new_attachment = false;
                     self.data_changed = false;
                     Task::none()
@@ -264,10 +271,17 @@ pub(crate) mod document_list {
                             println!("Error deleting old file: {}", err);
                         });
 
-                        fs::copy(self.current_file_path.as_ref().unwrap(), &file_path).unwrap_or_else(|err| {
-                            println!("Error copying file to data folder: {}", err);
-                            0
-                        });
+                        if self.file_scanned {
+                            fs::write(file_path.clone(), self.current_file_bytes.as_ref().unwrap()).unwrap_or_else(|err| {
+                                println!("Error writing bytes to file: {}", err);
+                            });
+                        }
+                        else {
+                            fs::copy(self.current_file_path.as_ref().unwrap(), &file_path).unwrap_or_else(|err| {
+                                println!("Error copying file to data folder: {}", err);
+                                0
+                            });
+                        }
 
                         conn.edit_attachment_file_path(current_attachment_id, file_path).unwrap_or_else(|err| {
                             println!("Error editing attachment file path: {}", err);
@@ -281,6 +295,8 @@ pub(crate) mod document_list {
                     self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
                     self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == current_attachment_id).cloned();
                     self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
+                    self.file_scanned = false;
+                    self.current_file_bytes = None;
                     self.data_changed = false;
                     Task::none()
                 },
@@ -302,6 +318,8 @@ pub(crate) mod document_list {
                     self.file_path_changed = false;
                     self.current_file_path = None;
                     self.current_file = None;
+                    self.current_file_bytes = None;
+                    self.file_scanned = false;
                     Task::none()
                 },
                 Message::KeyEvent(key) => {
@@ -312,6 +330,79 @@ pub(crate) mod document_list {
 
                         _ => Task::none()
                     }
+                },
+                Message::Scan => {
+                    let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                    let temp_path = std::env::temp_dir().join("temp").join(format!("scan_{}.png", time));
+                    if let Some(parent) = temp_path.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let temp_path_clone = temp_path.clone();
+
+                    return Task::perform(
+                        async move {
+                            let script = format!(r#"
+                            $out = '{}';
+                            $d = New-Object -ComObject WIA.CommonDialog;
+                            $img = $d.ShowAcquireImage();
+                            if ($img -ne $null) {{ 
+                                $img.SaveFile($out); 
+                                Write-Output $out;
+                                Read-Host -Prompt 'Press enter to continue';
+                                exit 0
+                            }}
+                            else {{ 
+                                exit 1
+                            }}
+                            "#,
+                            temp_path.to_string_lossy()
+                            );
+
+                            let output = std::process::Command::new("powershell.exe")
+                                .arg("-NoProfile")
+                                .arg("-ExecutionPolicy")
+                                .arg("Bypass")
+                                .arg("-Command")
+                                .arg(script)
+                                .stdin(Stdio::null())
+                                .output();
+
+                            match output {
+                                Ok(out) if out.status.success() => {
+                                    println!("Success");
+                                    String::from_utf8_lossy(&out.stdout).trim().to_string()
+                                }
+                                _ => String::new()
+                            }
+                        },
+
+                        move |path| {
+                            if path.is_empty() {
+                                Message::None
+                            }
+                            else {
+                                Message::Scanned(path.into())
+                            }
+                        }
+                    )
+                }
+                Message::Scanned(temp_path) => {
+                    match fs::read(&temp_path) {
+                        Ok(bytes) => {
+                            self.file_scanned = true;
+                            self.file_path_changed = true;
+                            self.data_changed = true;
+                            self.current_file_bytes = Some(bytes.clone());
+                            self.current_file = Some(Handle::from_bytes(bytes.clone()));
+                            self.current_file_path = Some(temp_path.to_string_lossy().to_string());
+                        },
+                        Err(err) => {
+                            println!("Error reading scanned image: {}", err);
+                            self.current_file = Some(Handle::from_path("src/ferris-error-handling.webp"));
+                            self.current_file_path = None;
+                        }
+                    }
+                    Task::none()
                 }
             }
         }
@@ -472,11 +563,15 @@ pub(crate) mod document_list {
                                                                     println!("No currently selected file.");
                                                                     String::new()
                                                                 })),
-                                                                button("Select").on_press(Message::OpenFileDialog)
+                                                                button("Select").on_press(Message::OpenFileDialog),
+                                                                button("Scan").on_press(Message::Scan)
                                                             ].spacing(5).width(Length::FillPortion(4))
                                                         ].width(Length::FillPortion(1)),
                                                         vertical_rule(2),
-                                                        Viewer::new(self.current_file.as_ref().unwrap()).width(Length::FillPortion(3)).height(Length::Fill)
+                                                        Viewer::new(self.current_file.clone().unwrap_or_else(|| {
+                                                            println!("No selected file yet.");
+                                                            Handle::from_path("src/ferris-error-handling.webp")
+                                                        })).width(Length::FillPortion(3)).height(Length::Fill)
                                                     ].spacing(5),
                                                 ].spacing(5)
                                                 ).width(Length::Fill).height(Length::Fill)
@@ -533,7 +628,8 @@ pub(crate) mod document_list {
                                                             println!("No currently selected file.");
                                                             String::new()
                                                         })),
-                                                        button("Select").on_press(Message::OpenFileDialog)
+                                                        button("Select").on_press(Message::OpenFileDialog),
+                                                        button("Scan").on_press(Message::Scan)
                                                     ].spacing(5).width(Length::FillPortion(4))
                                                 ].width(Length::FillPortion(1)),
                                                 vertical_rule(2),
@@ -643,6 +739,8 @@ pub(crate) mod document_list {
         OpenFileDialog,
         Back,
         KeyEvent(Key),
+        Scan,
+        Scanned(PathBuf),
         None,
     }
 
