@@ -46,7 +46,7 @@ struct State {
     document_list: DocumentList,
     settings: Settings,
     current_theme: Theme,
-    search_text: String,
+    previous_tab: Option<Tab>
 }
 
 impl State {
@@ -60,7 +60,7 @@ impl State {
             document_list: DocumentList::new(),
             settings,
             current_theme: initial_theme,
-            search_text: String::default(),
+            previous_tab: None
         }
     }
 
@@ -69,12 +69,21 @@ impl State {
             Message::SelectedTab(tab) => {
                 match tab {
                     Tab::Home => {
+                        if tab != self.current_tab {
+                            self.previous_tab = Some(self.current_tab);
+                        }
                         self.current_tab = tab;
                     },
                     Tab::DocumentList => {
+                        if tab != self.current_tab {
+                            self.previous_tab = Some(self.current_tab);
+                        }
                         self.current_tab = tab;
                     },
                     Tab::Settings => {
+                        if tab != self.current_tab {
+                            self.previous_tab = Some(self.current_tab);
+                        }
                         self.current_tab = tab;
                     }
                 }
@@ -89,7 +98,10 @@ impl State {
             Message::DocumentList(document_list_message) => {
                 match document_list_message {
                     document_list::Message::Back => {
-                        self.current_tab = Tab::Home;
+                        self.current_tab = self.previous_tab.unwrap_or_else(|| {
+                            println!("No previous tab");
+                            self.current_tab
+                        });
                     }
                     _ => {
                         //let Screen::DocumentList(screen) = &mut self.current_screen else { return Task::none(); };
@@ -102,6 +114,12 @@ impl State {
                     settings::Message::ChangeTheme(theme) => {
                         self.current_theme = theme.clone();
                         self.settings.set_theme(theme);
+                    }
+                    settings::Message::Back => {
+                        self.current_tab = self.previous_tab.unwrap_or_else(|| {
+                            println!("No previous tab");
+                            self.current_tab
+                        });
                     }
                     _ => {
                         return self.settings.update(settings_message).map(Message::Settings)

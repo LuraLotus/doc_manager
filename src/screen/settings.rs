@@ -1,5 +1,5 @@
 pub(crate) mod settings {
-    use iced::{Alignment::Center, Element, Length, Task, Theme, widget::{Container, Grid, PickList, Text, column, pick_list, row}};
+    use iced::{Alignment::Center, Element, Length, Task, Theme, widget::{Container, Grid, PickList, Text, button, column, container, pick_list, row, rule}};
 
     pub(crate) struct Settings {
         current_theme: Option<Theme>
@@ -17,16 +17,26 @@ pub(crate) mod settings {
                 Message::ChangeTheme(theme) => {
                     self.current_theme = Some(theme);
                     Task::none()
-                }
+                },
+                Message::Back => Task::none()
             }
         }
 
         pub(crate) fn view(&self) -> Element<Message> {
             Container::new(column![
-                row![
-                    Text::new("Theme: ").align_y(Center),
-                    PickList::new(Settings::available_themes(), self.current_theme.clone(), Message::ChangeTheme)
-                ].spacing(5).align_y(Center),
+                Container::new(row![
+                    button("<").on_press(Message::Back)
+                ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill),
+                Container::new(column![
+                    row![
+                        Text::new("Settings").size(20)
+                    ].spacing(5).align_y(Center),
+                    rule::horizontal(2),
+                    row![
+                        Text::new("Theme: ").align_y(Center),
+                        PickList::new(Settings::available_themes(), self.current_theme.clone(), Message::ChangeTheme)
+                    ].spacing(5).align_y(Center)
+                ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill),
             ].spacing(5)).padding(5).into()
         }
 
@@ -38,16 +48,6 @@ pub(crate) mod settings {
             }
 
             return available_themes;
-
-            // vec![
-            //     Theme::Nightfly,
-            //     Theme::TokyoNight,
-            //     Theme::CatppuccinLatte,
-            //     Theme::CatppuccinFrappe,
-            //     Theme::CatppuccinMacchiato,
-            //     Theme::CatppuccinMocha
-
-            // ]
         }
 
         pub(crate) fn set_theme(&mut self, theme: Theme) {
@@ -59,7 +59,8 @@ pub(crate) mod settings {
 
     #[derive(Debug, Clone)]
     pub(crate) enum Message {
-        ChangeTheme(Theme)
+        ChangeTheme(Theme),
+        Back
     }
 
     impl Default for Settings {
