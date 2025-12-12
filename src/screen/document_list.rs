@@ -1,7 +1,7 @@
 pub(crate) mod document_list {
     use std::{env::{current_dir, current_exe}, fs, io::Cursor, path::PathBuf, process::Stdio, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
-    use caesium::{compress_in_memory, convert_in_memory, parameters::CSParameters};
+    use caesium::{compress_in_memory, convert_in_memory, parameters::{CSParameters, PngParameters}};
     use file_format::FileFormat;
     use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, widget::{Container, Id, MouseArea, ProgressBar, Space, Text, button, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
     use iced::widget::text_input;
@@ -211,22 +211,20 @@ pub(crate) mod document_list {
                     let file_path = format!("./data/{}/{}", current_document_id, file_name);
 
                     if self.file_scanned {
-                        let bytes = self.current_file_bytes.clone().unwrap_or_else(|| {
+                        let mut bytes = self.current_file_bytes.clone().unwrap_or_else(|| {
                             println!("Current file bytes is none");
                             Vec::new()
                         });
 
-                        let mut converted_bytes: Vec<u8> = Vec::new();
-
-                        if !(FileFormat::from_bytes(&bytes).extension() == "png") {
+                        if FileFormat::from_bytes(&bytes).extension() != "png" {
                             let img = image::load_from_memory(&bytes);
-                            match img.unwrap().write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
+                            match img.unwrap().write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png) {
                                 Err(err) => println!("Error converting image format: {}", err),
                                 _ => {}
                             }
                         }
                         let parameters = CSParameters::new();
-                        let compressed_bytes = compress_in_memory(converted_bytes, &parameters).unwrap_or_else(|err| {
+                        let compressed_bytes = compress_in_memory(bytes, &parameters).unwrap_or_else(|err| {
                             println!("Error compressing image: {}", err);
                             Vec::new()
                         });
@@ -236,7 +234,7 @@ pub(crate) mod document_list {
                         });
                     }
                     else {
-                        let bytes = fs::read(self.current_file_path.clone().unwrap_or_else(|| {
+                        let mut bytes = fs::read(self.current_file_path.clone().unwrap_or_else(|| {
                             println!("Error reading file from path");
                             String::new()
                         })).unwrap_or_else(|err| {
@@ -244,17 +242,18 @@ pub(crate) mod document_list {
                             Vec::new()
                         });
 
-                        let mut converted_bytes: Vec<u8> = Vec::new();
-
-                        if !(FileFormat::from_bytes(bytes.clone()).extension() == "png") {
+                        if FileFormat::from_bytes(&bytes).extension() != "png" {
                             let img = image::load_from_memory(&bytes);
-                            match img.unwrap().write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
+                            match img.unwrap().write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png) {
                                 Err(err) => println!("Error converting image format: {}", err),
                                 _ => {}
                             }
                         }
-                        let parameters = CSParameters::new();
-                        let compressed_bytes = compress_in_memory(converted_bytes, &parameters).unwrap_or_else(|err| {
+                        let mut parameters = CSParameters::new();
+                        parameters.png.quality = 100;
+                        parameters.png.optimize = true;
+                        parameters.png.optimization_level = 6;
+                        let compressed_bytes = compress_in_memory(bytes, &parameters).unwrap_or_else(|err| {
                             println!("Error compressing image: {}", err);
                             Vec::new()
                         });
@@ -331,22 +330,20 @@ pub(crate) mod document_list {
                         });
 
                         if self.file_scanned {
-                            let bytes = self.current_file_bytes.clone().unwrap_or_else(|| {
+                            let mut bytes = self.current_file_bytes.clone().unwrap_or_else(|| {
                                 println!("Current file bytes is none");
                                 Vec::new()
                             });
 
-                            let mut converted_bytes: Vec<u8> = Vec::new();
-
-                            if !(FileFormat::from_bytes(&bytes).extension() == "png") {
+                            if FileFormat::from_bytes(&bytes).extension() != "png" {
                                 let img = image::load_from_memory(&bytes);
-                                match img.unwrap().write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
+                                match img.unwrap().write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png) {
                                     Err(err) => println!("Error converting image format: {}", err),
                                     _ => {}
                                 }
                             }
                             let parameters = CSParameters::new();
-                            let compressed_bytes = compress_in_memory(converted_bytes, &parameters).unwrap_or_else(|err| {
+                            let compressed_bytes = compress_in_memory(bytes, &parameters).unwrap_or_else(|err| {
                                 println!("Error compressing image: {}", err);
                                 Vec::new()
                             });
@@ -356,7 +353,7 @@ pub(crate) mod document_list {
                             });
                         }
                         else {
-                            let bytes = fs::read(self.current_file_path.clone().unwrap_or_else(|| {
+                            let mut bytes = fs::read(self.current_file_path.clone().unwrap_or_else(|| {
                                 println!("Error reading file from path");
                                 String::new()
                             })).unwrap_or_else(|err| {
@@ -364,17 +361,15 @@ pub(crate) mod document_list {
                                 Vec::new()
                             });
 
-                            let mut converted_bytes: Vec<u8> = Vec::new();
-
-                            if !(FileFormat::from_bytes(bytes.clone()).extension() == "png") {
+                            if FileFormat::from_bytes(&bytes).extension() != "png" {
                                 let img = image::load_from_memory(&bytes);
-                                match img.unwrap().write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
+                                match img.unwrap().write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png) {
                                     Err(err) => println!("Error converting image format: {}", err),
                                     _ => {}
                                 }
                             }
                             let parameters = CSParameters::new();
-                            let compressed_bytes = compress_in_memory(converted_bytes, &parameters).unwrap_or_else(|err| {
+                            let compressed_bytes = compress_in_memory(bytes, &parameters).unwrap_or_else(|err| {
                                 println!("Error compressing image: {}", err);
                                 Vec::new()
                             });

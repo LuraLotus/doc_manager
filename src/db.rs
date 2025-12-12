@@ -45,10 +45,6 @@ pub(crate) mod db_module {
                         FOREIGN KEY(document_id) REFERENCES document(document_id)
                     )", ())?;
 
-
-                    conn.execute("INSERT INTO document (document_number, document_type, comment) VALUES (?1, ?2, ?3)", ("Test Number", "Test Type", "Test Comment"))?;
-                    conn.execute("INSERT INTO document (document_number, document_type, comment) VALUES (?1, ?2, ?3)", ("Test Number 2", "Test Type 2", "Test Comment"))?;
-                    conn.execute("INSERT INTO attachment (file_path, reference_number, comment, document_id) VALUES (?1, ?2, ?3, ?4)", ("Test Path", "12345", "Test Comment", 1))?;
                     fs::create_dir("data").unwrap_or_else(|err| {
                         println!("Error creating data folder: {}", err);
                     });

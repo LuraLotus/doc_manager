@@ -45,8 +45,8 @@ pub(crate) enum Tab {
     Settings
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-enum LocalTheme {
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub(crate) enum LocalTheme {
     Light,
     Dark,
     Dracula,
@@ -255,10 +255,16 @@ impl State {
             Message::DocumentList(document_list_message) => {
                 match document_list_message {
                     document_list::Message::Back => {
-                        self.current_tab = self.previous_tab.unwrap_or_else(|| {
-                            println!("No previous tab");
-                            self.current_tab
-                        });
+                        if self.current_tab != self.previous_tab.unwrap() {
+                            self.current_tab = self.previous_tab.unwrap_or_else(|| {
+                                println!("No previous tab");
+                                self.current_tab
+                            });
+                        }
+                        else {
+                            self.current_tab = Tab::Home;
+                        }
+                        
                     }
                     _ => {
                         //let Screen::DocumentList(screen) = &mut self.current_screen else { return Task::none(); };
@@ -281,10 +287,14 @@ impl State {
                         self.document_list.set_current_theme(theme.clone().into());
                     }
                     settings::Message::Back => {
-                        self.current_tab = self.previous_tab.unwrap_or_else(|| {
-                            println!("No previous tab");
-                            self.current_tab
-                        });
+                        if self.current_tab != self.previous_tab.unwrap() {
+                            self.current_tab = self.previous_tab.unwrap_or_else(|| {
+                                println!("No previous tab");
+                                self.current_tab
+                            });
+                        } else {
+                            self.current_tab = Tab::Home;
+                        }
                     }
                     _ => {
                         return self.settings.update(settings_message).map(Message::Settings)
@@ -335,5 +345,29 @@ impl State {
 impl Default for State {
     fn default() -> Self {
         State::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_localtheme_from() {
+        let theme = LocalTheme::from(Theme::Dark);
+        assert_eq!(theme, LocalTheme::Dark);
+    }
+
+    #[test]
+    fn test_localtheme_into() {
+        assert_eq!(Into::<Theme>::into(LocalTheme::Dark), Theme::Dark);
+    }
+
+    #[test]
+    fn test_config() {
+        let config = Config::new();
+        assert!(fs::exists("./config.toml").expect("File not found"));
+        assert_eq!(config.current_theme(), LocalTheme::from(Theme::CatppuccinMacchiato));
+
     }
 }
