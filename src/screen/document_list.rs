@@ -3,13 +3,13 @@ pub(crate) mod document_list {
 
     use caesium::{compress_in_memory, convert_in_memory, parameters::CSParameters};
     use file_format::FileFormat;
-    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Shadow, Subscription, Task, advanced::graphics::futures::subscription, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, widget::{Container, Id, MouseArea, ProgressBar, Space, Text, button, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
+    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, widget::{Container, Id, MouseArea, ProgressBar, Space, Text, button, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
     use iced::widget::text_input;
-    use iced_aw::{Card, TabBarPosition, TabLabel, Tabs};
+    use iced_aw::{Card, TabBarPosition, TabLabel, Tabs, card::Status, style::card};
     use rfd::FileDialog;
     use time::{Duration, OffsetDateTime, UtcDateTime, macros::format_description};
 
-    use crate::{db::db_module::DbConnection, screen::{Attachment, Document}};
+    use crate::{LocalTheme, State, db::db_module::DbConnection, screen::{Attachment, Document}};
 
     #[derive(Debug, Clone, Default)]
     pub(crate) struct DocumentList {
@@ -36,6 +36,7 @@ pub(crate) mod document_list {
         input3_id: Option<Id>,
         scanning: bool,
         scan_progress: f32,
+        current_theme: Option<LocalTheme>
     }
 
     impl DocumentList {
@@ -63,8 +64,13 @@ pub(crate) mod document_list {
                 input2_id: Some(Id::new("2")),
                 input3_id: Some(Id::new("3")),
                 scanning: false,
-                scan_progress: f32::default()
+                scan_progress: f32::default(),
+                current_theme: None
             }
+        }
+
+        pub(crate) fn set_current_theme(&mut self, theme: LocalTheme) {
+            self.current_theme = Some(theme);
         }
 
         pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
@@ -557,7 +563,7 @@ pub(crate) mod document_list {
             let mut document_cards: Vec<DataCard> = Vec::new();
 
             for document in &self.documents {
-                document_cards.push(DataCard::new(Some(document.clone()), None));
+                document_cards.push(DataCard::new(Some(document.clone()), None, self.current_theme.clone().unwrap()));
             }
 
             for card in document_cards.iter() {
@@ -668,7 +674,7 @@ pub(crate) mod document_list {
                                 let mut attachment_cards: Vec<DataCard> = Vec::new();
 
                                 for attachment in &self.current_open_document.as_ref().unwrap().get_attachments().unwrap() {
-                                    attachment_cards.push(DataCard::new(None, Some(attachment.clone())));
+                                    attachment_cards.push(DataCard::new(None, Some(attachment.clone()), self.current_theme.clone().unwrap()));
                                 }
                                 match &self.current_open_attachment {
                                     None => {
@@ -825,14 +831,16 @@ pub(crate) mod document_list {
 
     struct DataCard {
         document: Option<Arc<Document>>,
-        attachment: Option<Arc<Attachment>>
+        attachment: Option<Arc<Attachment>>,
+        theme: LocalTheme
     }
 
     impl DataCard {
-        fn new(document: Option<Arc<Document>>, attachment: Option<Arc<Attachment>>) -> DataCard {
+        fn new(document: Option<Arc<Document>>, attachment: Option<Arc<Attachment>>, theme: LocalTheme) -> DataCard {
             DataCard {
                 document: document,
-                attachment: attachment
+                attachment: attachment,
+                theme: theme
             }
         }
 
@@ -849,7 +857,7 @@ pub(crate) mod document_list {
                 Card::new(Text::new(self.document.as_ref().unwrap().get_document_number().to_string()), column![
                     Text::new(self.document.as_ref().unwrap().get_document_type().to_string()),
                     Text::new(self.document.as_ref().unwrap().get_comment().to_string())
-                ]).max_height(500.0).max_width(200.0).foot(Text::new(datetime))
+                ]).max_height(500.0).max_width(200.0).foot(Text::new(datetime)).style(|theme: &Theme, _| card_style(theme))
             ).on_press(Message::OpenDocument(self.document.as_ref().unwrap().clone())).interaction(Interaction::Pointer)
         }
 
@@ -865,7 +873,7 @@ pub(crate) mod document_list {
             mouse_area(
                 Card::new(Text::new(self.attachment.as_ref().unwrap().get_reference_number().to_string()), column![
                     Text::new(self.attachment.as_ref().unwrap().get_comment().to_string())
-                ]).max_height(500.0).max_width(200.0).foot(Text::new(datetime))
+                ]).max_height(500.0).max_width(200.0).foot(Text::new(datetime)).style(|theme, _| card_style(theme))
             ).on_press(Message::OpenAttachment(self.attachment.as_ref().unwrap().clone())).interaction(Interaction::Pointer)
         }
 
@@ -875,6 +883,22 @@ pub(crate) mod document_list {
 
         pub(crate) fn get_attachment(&self) -> Arc<Attachment> {
             return self.attachment.as_ref().unwrap().clone()
+        }
+    }
+
+    fn card_style(theme: &Theme) -> card::Style {
+        card::Style {
+            background: theme.extended_palette().background.base.color.into(),
+            border_radius: 10.0,
+            border_width: 1.0,
+            border_color: theme.extended_palette().primary.base.color.into(),
+            head_background: theme.extended_palette().primary.base.color.into(),
+            head_text_color: theme.extended_palette().primary.base.text.into(),
+            body_background: Color::TRANSPARENT.into(),
+            body_text_color: theme.extended_palette().background.base.text.into(),
+            foot_background: Color::TRANSPARENT.into(),
+            foot_text_color: theme.extended_palette().background.base.text.into(),
+            close_color: Default::default(),
         }
     }
 

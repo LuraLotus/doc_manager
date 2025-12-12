@@ -1,5 +1,6 @@
 pub(crate) mod settings {
     use iced::{Alignment::Center, Element, Length, Task, Theme, widget::{Container, Grid, PickList, Text, button, column, container, pick_list, row, rule}};
+    use iced_aw::Card;
 
     pub(crate) struct Settings {
         current_theme: Option<Theme>
@@ -35,7 +36,7 @@ pub(crate) mod settings {
                     row![
                         Text::new("Theme: ").align_y(Center),
                         PickList::new(Settings::available_themes(), self.current_theme.clone(), Message::ChangeTheme)
-                    ].spacing(5).align_y(Center)
+                    ].spacing(5).align_y(Center),
                 ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill),
             ].spacing(5)).padding(5).into()
         }

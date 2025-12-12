@@ -21,6 +21,7 @@ pub(crate) mod main_menu {
             Container::new(row![
                 column![
                     text("Main Menu"),
+                    text("Ignore this screen").size(20),
                     button("Home").on_press(Message::None),
                     button("Document List").on_press(Message::ToDocumentList),
                     button("New Document").on_press(Message::NewDocument),

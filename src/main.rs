@@ -6,15 +6,16 @@ use std::path::Path;
 
 use iced::alignment::Horizontal::Left;
 use iced::{Element, Subscription, Task, Theme};
-use iced::widget::{Container, container, row};
+use iced::widget::{Container, container, row, rule};
 use iced_aw::sidebar::TabLabel;
+use iced_aw::style::card;
 use iced_aw::widget::Sidebar;
 use screen::main_menu::main_menu;
 use screen::document_list::document_list;
 use screen::settings::settings;
 use serde::{Deserialize, Serialize};
 
-use crate::screen::MainMenu;
+use crate::screen::{MainMenu, document};
 use crate::screen::DocumentList;
 use crate::screen::Settings;
 
@@ -44,7 +45,7 @@ pub(crate) enum Tab {
     Settings
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 enum LocalTheme {
     Light,
     Dark,
@@ -233,6 +234,7 @@ impl State {
                         if tab != self.current_tab {
                             self.previous_tab = Some(self.current_tab);
                         }
+                        self.document_list.set_current_theme(self.config.current_theme().into());
                         self.current_tab = tab;
                     },
                     Tab::Settings => {
@@ -275,7 +277,8 @@ impl State {
                         fs::write("./config.toml", serialized).unwrap_or_else(|err| {
                             println!("Error writing to config file: {}", err);
                         });
-                        self.settings.set_theme(theme);
+                        self.settings.set_theme(theme.clone());
+                        self.document_list.set_current_theme(theme.clone().into());
                     }
                     settings::Message::Back => {
                         self.current_tab = self.previous_tab.unwrap_or_else(|| {
@@ -305,9 +308,9 @@ impl State {
                 .push(Tab::DocumentList, TabLabel::Text(String::from("Document List")))
                 .push(Tab::Settings, TabLabel::Text(String::from("Settings")))
                 .align_tabs(iced::Alignment::Start)
-                .set_active_tab(&self.current_tab),
+            .set_active_tab(&self.current_tab),
             container(screen)
-        ]).into()
+        ].spacing(5)).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
