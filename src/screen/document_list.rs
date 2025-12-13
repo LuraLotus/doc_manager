@@ -76,10 +76,8 @@ pub(crate) mod document_list {
         pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
             match message {
                 Message::NewDocument => {
+                    self.reset_state();
                     self.create_new_document = true;
-                    self.current_document_number.clear();
-                    self.current_document_type.clear();
-                    self.current_comment.clear();
                     Task::none()
                 },
                 Message::SaveNewDocument => {
@@ -93,14 +91,13 @@ pub(crate) mod document_list {
                         0
                     });
 
-                    self.create_new_document = false;
+                    self.reset_state();
                     self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
                     self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == conn.get_last_rowid().unwrap() as u32).cloned();
                     let file_path = format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_id());
                     fs::create_dir(file_path).unwrap_or_else(|err| {
                         println!("Error creating document's attachment folder: {}", err);
                     });
-                    self.data_changed = false;
                     Task::none()
                 },
                 Message::OpenDocument(document) => {
@@ -123,9 +120,9 @@ pub(crate) mod document_list {
                         0
                     });
 
+                    self.reset_state();
                     self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
                     self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
-                    self.data_changed = false;
                     Task::none()
                 }
                 Message::SwitchTab(tab) => {
@@ -133,14 +130,7 @@ pub(crate) mod document_list {
                     Task::none()
                 },
                 Message::CloseDocument => {
-                    self.current_open_document = None;
-                    self.current_document_number.clear();
-                    self.current_document_type.clear();
-                    self.current_comment.clear();
-                    self.data_changed = false;
-                    self.create_new_document = false;
-                    self.create_new_attachment = false;
-                    self.current_document_tab = Tab::default();
+                    self.reset_state();
                     String::clear(&mut self.search_text);
                     Task::none()
                 }
@@ -166,6 +156,7 @@ pub(crate) mod document_list {
                     Task::none()
                 },
                 Message::NewAttachment => {
+                    self.reset_attachment_state();
                     self.create_new_attachment = true;
                     Task::none()
                 },
@@ -267,18 +258,14 @@ pub(crate) mod document_list {
                         println!("Error editing attachment file path: {}", err);
                         0
                     });
- 
+
+                    self.reset_attachment_state();
                     self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
                     self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
                     self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == conn.get_last_rowid().unwrap() as u32).cloned();
                     self.current_attachment_reference_number = self.current_open_attachment.as_ref().unwrap().get_reference_number().to_string();
                     self.current_attachment_comment = self.current_open_attachment.as_ref().unwrap().get_comment().to_string();
                     self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
-                    self.file_scanned = false;
-                    self.current_file_bytes = None;
-                    self.create_new_attachment = false;
-                    self.data_changed = false;
-                    self.file_path_changed = false;
                     Task::none()
                     
                 },
@@ -387,13 +374,11 @@ pub(crate) mod document_list {
                         self.file_path_changed = false;
                     }
 
+                    self.reset_attachment_state();
                     self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
                     self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
                     self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == current_attachment_id).cloned();
                     self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
-                    self.file_scanned = false;
-                    self.current_file_bytes = None;
-                    self.data_changed = false;
                     Task::none()
                 },
                 Message::CurrentAttachmentReferenceNumberChange(input) => {
@@ -407,15 +392,7 @@ pub(crate) mod document_list {
                     Task::none()
                 },
                 Message::CloseAttachment => {
-                    self.current_open_attachment = None;
-                    self.current_attachment_reference_number.clear(); 
-                    self.current_attachment_comment.clear();
-                    self.data_changed = false;
-                    self.file_path_changed = false;
-                    self.current_file_path = None;
-                    self.current_file = None;
-                    self.current_file_bytes = None;
-                    self.file_scanned = false;
+                    self.reset_attachment_state();
                     Task::none()
                 },
                 Message::KeyEvent(key) => {
@@ -532,6 +509,12 @@ pub(crate) mod document_list {
                     }
                     Task::none()
                 }
+                Message::DeleteDocument => {
+                    Task::none()
+                },
+                Message::DeleteAttachment => {
+                    Task::none()
+                }
             }
         }
 
@@ -573,7 +556,7 @@ pub(crate) mod document_list {
                             Container::new(column![
                                 Container::new(row![
                                     button("<").on_press(Message::CloseDocument),
-                                    button("Save").on_press(Message::SaveNewDocument)
+                                    button("Save").on_press(Message::SaveNewDocument),
                                 ].spacing(5)).width(Length::Fill).padding(5).style(container::bordered_box),
                                 Container::new(column![
                                     row![
@@ -642,7 +625,8 @@ pub(crate) mod document_list {
                                         }
                                         else {
                                             button("Save")
-                                        }
+                                        },
+                                        button("New").on_press(Message::NewDocument)
                                     ].spacing(5).align_y(Center)).width(Length::Fill).padding(5).style(container::bordered_box),
                                     Container::new(column![
                                         row![
@@ -750,7 +734,8 @@ pub(crate) mod document_list {
                                                 }
                                                 else {
                                                     button("Save")
-                                                }
+                                                },
+                                                button("New").on_press(Message::NewAttachment)
                                             ].spacing(5)).width(Length::Fill).padding(5).style(container::bordered_box),
                                             Container::new(column![
                                                 row![
@@ -821,6 +806,41 @@ pub(crate) mod document_list {
             };
 
             Subscription::batch(vec![kb_event, tick_event])
+        }
+
+        fn reset_state(&mut self) {
+            self.current_open_document = None;
+            self.current_document_number.clear();
+            self.current_document_type.clear();
+            self.current_comment.clear();
+            self.current_open_attachment = None;
+            self.current_attachment_reference_number.clear();
+            self.current_attachment_comment.clear();
+            self.current_file = None;
+            self.current_file_bytes = None;
+            self.current_file_path = None;
+            self.data_changed = false;
+            self.file_path_changed = false;
+            self.file_scanned = false;
+            self.scanning = false;
+            self.scan_progress = 0.0;
+            self.create_new_document = false;
+            self.create_new_attachment = false;
+        }
+
+        fn reset_attachment_state(&mut self) {
+            self.current_open_attachment = None;
+            self.current_attachment_reference_number.clear();
+            self.current_attachment_comment.clear();
+            self.current_file = None;
+            self.current_file_bytes = None;
+            self.current_file_path = None;
+            self.data_changed = false;
+            self.file_path_changed = false;
+            self.file_scanned = false;
+            self.scanning = false;
+            self.scan_progress = 0.0;
+            self.create_new_attachment = false;
         }
     }
 
@@ -907,6 +927,7 @@ pub(crate) mod document_list {
         SaveCurrentDocument,
         SaveNewDocument,
         SwitchTab(Tab),
+        DeleteDocument,
         CloseDocument,
         NewAttachment,
         SaveNewAttachment,
@@ -914,6 +935,7 @@ pub(crate) mod document_list {
         SaveCurrentAttachment,
         CurrentAttachmentReferenceNumberChange(String),
         CurrentAttachmentCommentChange(String),
+        DeleteAttachment,
         CloseAttachment,
         SearchTextChange(String),
         OpenFileDialog,

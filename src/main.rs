@@ -5,10 +5,10 @@ use std::fs;
 use std::path::Path;
 
 use iced::alignment::Horizontal::Left;
-use iced::{Element, Subscription, Task, Theme};
-use iced::widget::{Container, container, row, rule};
+use iced::{Border, Color, Element, Length, Subscription, Task, Theme};
+use iced::widget::{Button, Column, Container, Text, button, column, container, row, rule};
 use iced_aw::sidebar::TabLabel;
-use iced_aw::style::card;
+use iced_aw::style::{card, sidebar};
 use iced_aw::widget::Sidebar;
 use screen::main_menu::main_menu;
 use screen::document_list::document_list;
@@ -313,14 +313,93 @@ impl State {
             Tab::Settings => self.settings.view().map(Message::Settings)
         };
         Container::new(row![
-            Sidebar::new(Message::SelectedTab)
-                .push(Tab::Home, TabLabel::Text(String::from("Home")))
-                .push(Tab::DocumentList, TabLabel::Text(String::from("Document List")))
-                .push(Tab::Settings, TabLabel::Text(String::from("Settings")))
-                .align_tabs(iced::Alignment::Start)
-            .set_active_tab(&self.current_tab),
-            container(screen)
-        ].spacing(5)).into()
+            Container::new(
+                sidebar(self.current_tab)
+                // Sidebar::new(Message::SelectedTab)
+                //     .push(Tab::Home, TabLabel::Text(String::from("Home")))
+                //     .push(Tab::DocumentList, TabLabel::Text(String::from("Document List")))
+                //     .push(Tab::Settings, TabLabel::Text(String::from("Settings")))
+                //     .align_tabs(iced::Alignment::Start)
+                // .set_active_tab(&self.current_tab).spacing(5).width(Length::FillPortion(1)).style(|theme: &Theme, status: iced_aw::style::Status| { 
+                //     match status {
+                //         iced_aw::style::Status::Active => sidebar::Style {
+                //             background: Some(Color::TRANSPARENT.into()),
+                //             border_color: Some(Color::TRANSPARENT),
+                //             border_width: 0.0,
+                //             tab_label_background: theme.extended_palette().background.weak.color.into(),
+                //             tab_label_border_color: Color::TRANSPARENT,
+                //             tab_label_border_width: 0.0,
+                //             icon_color: Default::default(),
+                //             icon_background: Default::default(),
+                //             icon_border_radius: Default::default(),
+                //             text_color: theme.extended_palette().background.base.text.into()
+                //         },
+                //         iced_aw::style::Status::Hovered => sidebar::Style {
+                //             background: Some(Color::TRANSPARENT.into()),
+                //             border_color: Some(Color::TRANSPARENT),
+                //             border_width: 0.0,
+                //             tab_label_background: theme.extended_palette().background.weak.color.into(),
+                //             tab_label_border_color: Color::TRANSPARENT,
+                //             tab_label_border_width: 0.0,
+                //             icon_color: Default::default(),
+                //             icon_background: Default::default(),
+                //             icon_border_radius: Default::default(),
+                //             text_color: theme.extended_palette().background.weak.text.into()
+                //         },
+                //         iced_aw::style::Status::Pressed => sidebar::Style {
+                //             background: Some(Color::TRANSPARENT.into()),
+                //             border_color: Some(Color::TRANSPARENT),
+                //             border_width: 0.0,
+                //             tab_label_background: theme.extended_palette().background.weaker.color.into(),
+                //             tab_label_border_color: Color::TRANSPARENT,
+                //             tab_label_border_width: 0.0,
+                //             icon_color: Default::default(),
+                //             icon_background: Default::default(),
+                //             icon_border_radius: Default::default(),
+                //             text_color: theme.extended_palette().background.weak.text.into()
+                //         },
+                //         iced_aw::style::Status::Disabled => sidebar::Style {
+                //             background: Some(Color::TRANSPARENT.into()),
+                //             border_color: Some(Color::TRANSPARENT),
+                //             border_width: 0.0,
+                //             tab_label_background: Color::TRANSPARENT.into(),
+                //             tab_label_border_color: Color::TRANSPARENT,
+                //             tab_label_border_width: 0.0,
+                //             icon_color: Default::default(),
+                //             icon_background: Default::default(),
+                //             icon_border_radius: Default::default(),
+                //             text_color: theme.extended_palette().background.weak.text.into()
+                //         },
+                //         iced_aw::style::Status::Focused => sidebar::Style {
+                //             background: Some(Color::TRANSPARENT.into()),
+                //             border_color: Some(Color::TRANSPARENT),
+                //             border_width: 0.0,
+                //             tab_label_background: theme.extended_palette().background.weaker.color.into(),
+                //             tab_label_border_color: Color::TRANSPARENT,
+                //             tab_label_border_width: 0.0,
+                //             icon_color: Default::default(),
+                //             icon_background: Default::default(),
+                //             icon_border_radius: Default::default(),
+                //             text_color: theme.extended_palette().background.weak.text.into()
+                //         },
+                //         iced_aw::style::Status::Selected => sidebar::Style {
+                //             background: Some(Color::TRANSPARENT.into()),
+                //             border_color: Some(Color::TRANSPARENT),
+                //             border_width: 0.0,
+                //             tab_label_background: theme.extended_palette().background.weak.color.into(),
+                //             tab_label_border_color: Color::TRANSPARENT,
+                //             tab_label_border_width: 0.0,
+                //             icon_color: Default::default(),
+                //             icon_background: Default::default(),
+                //             icon_border_radius: Default::default(),
+                //             text_color: theme.extended_palette().background.weak.text.into()
+                //         },
+                //     }
+                // }
+                
+            ).padding(5),
+            container(screen).width(Length::FillPortion(5))
+        ]).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -345,6 +424,100 @@ impl State {
 impl Default for State {
     fn default() -> Self {
         State::new()
+    }
+}
+
+fn sidebar(selected_tab: Tab) -> Element<'static, Message> {
+    Container::new(
+        column![
+            button(Text::from("Home").size(18)).on_press(Message::SelectedTab(Tab::Home)).width(Length::Fill).style(move |theme: &Theme, status| 
+                if selected_tab == Tab::Home {
+                    sidebar_button_selected_style(theme)
+                }
+                else {
+                    sidebar_button_style(theme, status)
+                }
+            ),
+            button(Text::from("Document List").size(18)).on_press(Message::SelectedTab(Tab::DocumentList)).width(Length::Fill).style(move |theme: &Theme, status|
+                if selected_tab == Tab::DocumentList {
+                    sidebar_button_selected_style(theme)
+                }
+                else {
+                    sidebar_button_style(theme, status)
+                }
+            ),
+            button(Text::from("Settings").size(18)).on_press(Message::SelectedTab(Tab::Settings)).width(Length::Fill).style(move |theme: &Theme, status|
+                if selected_tab == Tab::Settings {
+                    sidebar_button_selected_style(theme)
+                }
+                else {
+                    sidebar_button_style(theme, status)
+                }
+            )
+        ].spacing(5).align_x(Left)
+    ).width(Length::FillPortion(1)).into()
+}
+
+fn sidebar_button_style(theme: &Theme, status: iced::widget::button::Status) -> iced::widget::button::Style {
+    match status {
+        button::Status::Active => iced::widget::button::Style {
+            text_color: theme.extended_palette().background.weak.text.into(),
+            background: Some(Color::TRANSPARENT.into()),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 5.0.into()
+            },
+            shadow: Default::default(),
+            snap: true
+        },
+        button::Status::Hovered => iced::widget::button::Style {
+            text_color: theme.extended_palette().background.weaker.text.into(),
+            background: Some(theme.extended_palette().background.weaker.color.into()),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 5.0.into()
+            },
+            shadow: Default::default(),
+            snap: true
+        },
+        button::Status::Pressed => iced::widget::button::Style {
+            text_color: theme.extended_palette().background.weaker.text.into(),
+            background: Some(theme.extended_palette().background.weaker.color.into()),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 5.0.into()
+            },
+            shadow: Default::default(),
+            snap: true
+        },
+        button::Status::Disabled => iced::widget::button::Style {
+            text_color: theme.extended_palette().background.strong.text.into(),
+            background: Some(theme.extended_palette().background.weak.color.into()),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 5.0.into()
+            },
+            shadow: Default::default(),
+            snap: true
+        },
+    }
+}
+
+fn sidebar_button_selected_style(theme: &Theme) -> iced::widget::button::Style {
+    iced::widget::button::Style {
+        text_color: theme.extended_palette().background.weak.text.into(),
+        background: Some(theme.extended_palette().background.weak.color.into()),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 5.0.into()
+        },
+        shadow: Default::default(),
+        snap: true
     }
 }
 
