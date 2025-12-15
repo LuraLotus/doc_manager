@@ -38,7 +38,7 @@ pub(crate) mod db_module {
                 conn.execute("CREATE TABLE attachment (
                         attachment_id INTEGER PRIMARY KEY,
                         file_path TEXT NOT NULL,
-                        reference_number TEXT,
+                        reference_number TEXT NOT NULL,
                         comment TEXT,
                         date_added INTEGER NOT NULL DEFAULT (unixepoch('now')),
                         document_id INTEGER NOT NULL,
@@ -122,6 +122,22 @@ pub(crate) mod db_module {
 
         pub(crate) fn edit_attachment_file_path(&mut self, attachment_id: u32, file_path: String) -> Result<usize, rusqlite::Error> {
             return self.conn.execute("UPDATE attachment SET file_path = ?1 WHERE attachment_id = ?2", (file_path, attachment_id))
+        }
+
+        pub(crate) fn delete_document(&mut self, document_id: u32) {
+            match self.conn.execute("DELETE FROM document WHERE document_id = ?1", (document_id.clone(),)) {
+                Ok(_) => println!("Successfully deleted document"),
+                Err(err) => println!("Error deleting document: {}", err)
+            }
+
+            match self.conn.execute("DELETE FROM attachment WHERE document_id = ?1", (document_id.clone(),)) {
+                Ok(_) => println!("Successfully deleted attachments"),
+                Err(err) => println!("Error deleting attachments: {}", err)
+            }
+        }
+
+        pub(crate) fn delete_attachment(&mut self, attachment_id: u32) -> Result<usize, rusqlite::Error> {
+            return self.conn.execute("DELETE FROM attachment WHERE attachment_id = ?1", (attachment_id,))
         }
 
         pub(crate) fn get_last_rowid(&self) -> Option<i64> {

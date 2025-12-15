@@ -1,5 +1,7 @@
 pub(crate) mod main_menu {
-    use iced::{Element, Event, Length, Task, widget::{Container, button, column, container, row, text}};
+    use iced::{Alignment::Center, Element, Event, Length, Task, widget::{Container, Image, button, column, container, image::{Handle, Viewer}, row, text}};
+
+    use crate::HOME_IMAGE;
 
     #[derive(Default, Debug, Clone)]
     pub(crate) struct MainMenu;
@@ -18,17 +20,11 @@ pub(crate) mod main_menu {
         }
 
         pub(crate) fn view(&self) -> Element<Message> {
-            Container::new(row![
-                column![
-                    text("Main Menu"),
-                    text("Ignore this screen").size(20),
-                    button("Home").on_press(Message::None),
-                    button("Document List").on_press(Message::ToDocumentList),
-                    button("New Document").on_press(Message::NewDocument),
-                    button("Settings").on_press(Message::None),
-                    ].spacing(10)
-                ]
-            ).width(Length::Fill).height(Length::Fill).style(container::rounded_box).into()
+            Container::new(
+                Image::new(Handle::from_bytes(HOME_IMAGE))
+                    .expand(true)
+                    .content_fit(iced::ContentFit::Cover)
+            ).align_x(Center).align_y(Center).width(Length::Fill).height(Length::Fill).into()
         }
         
     }

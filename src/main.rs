@@ -19,9 +19,11 @@ use crate::screen::{MainMenu, document};
 use crate::screen::DocumentList;
 use crate::screen::Settings;
 
+const ERROR_FERRIS: &[u8] = include_bytes!("../ferris-error-handling.webp");
+const HOME_IMAGE: &[u8] = include_bytes!("../home.jpg");
+
 
 pub fn main() -> iced::Result {
-    // let conn: Result<Connection, rusqlite::Error> = db_init();
     iced::application(State::new, State::update, State::view)
     .theme(State::current_theme)
     .subscription(State::subscription)
@@ -472,8 +474,8 @@ fn sidebar_button_style(theme: &Theme, status: iced::widget::button::Status) -> 
             snap: true
         },
         button::Status::Hovered => iced::widget::button::Style {
-            text_color: theme.extended_palette().background.weaker.text.into(),
-            background: Some(theme.extended_palette().background.weaker.color.into()),
+            text_color: theme.extended_palette().background.weakest.text.into(),
+            background: Some(theme.extended_palette().background.weakest.color.into()),
             border: Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,

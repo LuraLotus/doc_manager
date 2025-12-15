@@ -7,9 +7,11 @@ edition = "2024"
 derivative = "2.2.0"
 features = "0.10.0"
 file-format = "0.28.0"
+hide_console = "0.2.1"
 iced = { version = "0.14.0", features = ["advanced", "image", "smol"] }
 iced-multi-window = "2.0.0"
 iced_aw = { version = "0.13.0", features = ["full"] }
+iced_dialog = "0.14.0"
 image = "0.25.9"
 libcaesium = "0.20.0"
 rfd = "0.16.0"

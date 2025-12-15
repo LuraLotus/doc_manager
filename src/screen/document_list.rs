@@ -3,13 +3,14 @@ pub(crate) mod document_list {
 
     use caesium::{compress_in_memory, convert_in_memory, parameters::{CSParameters, PngParameters}};
     use file_format::FileFormat;
-    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, widget::{Container, Id, MouseArea, ProgressBar, Space, Text, button, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
+    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
     use iced::widget::text_input;
     use iced_aw::{Card, TabBarPosition, TabLabel, Tabs, card::Status, style::card};
+    use iced_dialog::dialog;
     use rfd::FileDialog;
     use time::{Duration, OffsetDateTime, UtcDateTime, macros::format_description};
 
-    use crate::{LocalTheme, State, db::db_module::DbConnection, screen::{Attachment, Document}};
+    use crate::{ERROR_FERRIS, LocalTheme, State, db::db_module::DbConnection, screen::{Attachment, Document}};
 
     #[derive(Debug, Clone, Default)]
     pub(crate) struct DocumentList {
@@ -36,7 +37,8 @@ pub(crate) mod document_list {
         input3_id: Option<Id>,
         scanning: bool,
         scan_progress: f32,
-        current_theme: Option<LocalTheme>
+        current_theme: Option<LocalTheme>,
+        show_confirm_delete: bool
     }
 
     impl DocumentList {
@@ -65,7 +67,8 @@ pub(crate) mod document_list {
                 input3_id: Some(Id::new("3")),
                 scanning: false,
                 scan_progress: f32::default(),
-                current_theme: None
+                current_theme: None,
+                show_confirm_delete: false
             }
         }
 
@@ -94,6 +97,9 @@ pub(crate) mod document_list {
                     self.reset_state();
                     self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
                     self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == conn.get_last_rowid().unwrap() as u32).cloned();
+                    self.current_document_number = self.current_open_document.as_ref().unwrap().get_document_number().to_string();
+                    self.current_document_type = self.current_open_document.as_ref().unwrap().get_document_type().to_string();
+                    self.current_comment = self.current_open_document.as_ref().unwrap().get_comment().to_string();
                     let file_path = format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_id());
                     fs::create_dir(file_path).unwrap_or_else(|err| {
                         println!("Error creating document's attachment folder: {}", err);
@@ -266,6 +272,7 @@ pub(crate) mod document_list {
                     self.current_attachment_reference_number = self.current_open_attachment.as_ref().unwrap().get_reference_number().to_string();
                     self.current_attachment_comment = self.current_open_attachment.as_ref().unwrap().get_comment().to_string();
                     self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
+                    self.current_file = Some(Handle::from_path(self.current_file_path.as_ref().unwrap()));
                     Task::none()
                     
                 },
@@ -281,7 +288,7 @@ pub(crate) mod document_list {
                             }
                             Err(err) => {
                                 println!("Error reading file: {}", err);
-                                self.current_file = Some(Handle::from_path("src/ferris-error-handling.webp"));
+                                self.current_file = Some(Handle::from_bytes(ERROR_FERRIS));
                             }
                         }
                     }
@@ -488,7 +495,7 @@ pub(crate) mod document_list {
                         },
                         Err(err) => {
                             println!("Error reading scanned image: {}", err);
-                            self.current_file = Some(Handle::from_path("src/ferris-error-handling.webp"));
+                            self.current_file = Some(Handle::from_bytes(ERROR_FERRIS));
                             self.current_file_path = None;
                         }
                     }
@@ -510,9 +517,35 @@ pub(crate) mod document_list {
                     Task::none()
                 }
                 Message::DeleteDocument => {
+                    let mut conn = DbConnection::new();
+                    conn.delete_document(self.current_open_document.as_ref().unwrap().get_document_id());
+                    match fs::remove_dir_all(format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_id())) {
+                        Err(err) => println!("Error deleting data directory: {}", err),
+                        Ok(_) => {}
+                    }
+
+                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                    self.reset_state();
+                    
                     Task::none()
                 },
                 Message::DeleteAttachment => {
+                    let mut conn = DbConnection::new();
+                    conn.delete_attachment(self.current_open_attachment.as_ref().unwrap().get_attachment_id());
+                    match fs::remove_file(self.current_file_path.as_ref().unwrap()) {
+                        Err(err) => println!("Error deleting file: {}", err),
+                        Ok(_) => {}
+                    }
+
+                    let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
+                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                    self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
+                    self.reset_attachment_state();
+                    
+                    Task::none()
+                },
+                Message::ShowConfirmDelete => {
+                    self.show_confirm_delete = true;
                     Task::none()
                 }
             }
@@ -585,8 +618,7 @@ pub(crate) mod document_list {
                             Container::new(column![
                                 Container::new(row![
                                         button("<").on_press(Message::Back),
-                                        button("New").on_press(Message::NewDocument),
-                                        button("Delete")
+                                        button("New").on_press(Message::NewDocument)
                                 ].spacing(5)).width(Length::Fill).padding(5).style(container::bordered_box),
                                 Container::new(column![
                                     row![
@@ -604,7 +636,7 @@ pub(crate) mod document_list {
                                         }).map(|card| {
                                             card.new_document_card().into()
                                         }) 
-                                    ).spacing(10).wrap())
+                                    ).spacing(10).wrap()),
                                 ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
                             ].spacing(5)
                             ).width(Length::Fill).height(Length::Fill).padding(5).into()
@@ -626,7 +658,18 @@ pub(crate) mod document_list {
                                         else {
                                             button("Save")
                                         },
-                                        button("New").on_press(Message::NewDocument)
+                                        button("New").on_press(Message::NewDocument),
+                                        Space::new().width(Length::Fill),
+                                        if self.show_confirm_delete {
+                                            row![
+                                                Text::from("Confirm deletion: "),
+                                                button("Confirm").on_press(Message::DeleteDocument),
+                                                button("Cancel")
+                                            ].spacing(5).align_y(Center)
+                                        }
+                                        else {
+                                            row![button("Delete").on_press(Message::ShowConfirmDelete)]
+                                        }
                                     ].spacing(5).align_y(Center)).width(Length::Fill).padding(5).style(container::bordered_box),
                                     Container::new(column![
                                         row![
@@ -644,8 +687,9 @@ pub(crate) mod document_list {
                                         row![
                                             Text::new("Comment: ").width(Length::FillPortion(1)), 
                                             text_input(&document.get_comment().to_string(), &self.current_comment).on_input(Message::CurrentCommentChange).width(Length::FillPortion(4)).id(self.input3_id.as_ref().unwrap().clone())
-                                        ].spacing(5).align_y(Center)
-                                    ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
+                                        ].spacing(5).align_y(Center),
+                                        
+                                    ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill),
                                 ].spacing(5)
                                 ).height(Length::Fill).width(Length::Fill)
                             },
@@ -690,7 +734,7 @@ pub(crate) mod document_list {
                                                             Container::new(
                                                                 Viewer::new(self.current_file.clone().unwrap_or_else(|| {
                                                                     println!("No selected file yet.");
-                                                                    Handle::from_path("src/ferris-error-handling.webp")
+                                                                    Handle::from_bytes(ERROR_FERRIS)
                                                                 })).width(Length::Fill).height(Length::Fill)
                                                             ).padding(5).style(container::bordered_box).width(Length::FillPortion(3)).height(Length::Fill)
                                                             
@@ -735,7 +779,19 @@ pub(crate) mod document_list {
                                                 else {
                                                     button("Save")
                                                 },
-                                                button("New").on_press(Message::NewAttachment)
+                                                button("New").on_press(Message::NewAttachment),
+                                                Space::new().width(Length::Fill),
+                                                if self.show_confirm_delete {
+                                                    row![
+                                                        Text::from("Confirm deletion: "),
+                                                        button("Confirm").on_press(Message::DeleteAttachment),
+                                                        button("Cancel")
+                                                    ].spacing(5).align_y(Center)
+                                                }
+                                                else {
+                                                    row![button("Delete").on_press(Message::ShowConfirmDelete)]
+                                                }
+                                                
                                             ].spacing(5)).width(Length::Fill).padding(5).style(container::bordered_box),
                                             Container::new(column![
                                                 row![
@@ -763,7 +819,7 @@ pub(crate) mod document_list {
                                                     Container::new(
                                                         Viewer::new(self.current_file.clone().unwrap_or_else(|| {
                                                             println!("Error displaying image.");
-                                                            Handle::from_path("src/ferris-error-handling.webp")
+                                                            Handle::from_bytes(ERROR_FERRIS)
                                                         })).width(Length::Fill).height(Length::Fill)
                                                     ).padding(5).style(container::bordered_box).width(Length::FillPortion(3)).height(Length::Fill)
                                                 ].spacing(5),
@@ -826,6 +882,7 @@ pub(crate) mod document_list {
             self.scan_progress = 0.0;
             self.create_new_document = false;
             self.create_new_attachment = false;
+            self.show_confirm_delete = false;
         }
 
         fn reset_attachment_state(&mut self) {
@@ -841,6 +898,7 @@ pub(crate) mod document_list {
             self.scanning = false;
             self.scan_progress = 0.0;
             self.create_new_attachment = false;
+            self.show_confirm_delete = false;
         }
     }
 
@@ -937,6 +995,7 @@ pub(crate) mod document_list {
         CurrentAttachmentCommentChange(String),
         DeleteAttachment,
         CloseAttachment,
+        ShowConfirmDelete,
         SearchTextChange(String),
         OpenFileDialog,
         Back,

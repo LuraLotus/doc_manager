@@ -1277,9 +1277,11 @@ dependencies = [
  "derivative",
  "features",
  "file-format",
+ "hide_console",
  "iced 0.14.0",
  "iced-multi-window",
  "iced_aw",
+ "iced_dialog",
  "image",
  "libcaesium",
  "rfd",
@@ -2178,6 +2180,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "hide_console"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "011a8b68c5b111a3774df573f3f341c9f41f6ed3489b33ae927f35a63a8277f9"
+dependencies = [
+ "cfg-if",
+ "winapi",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2305,6 +2317,16 @@ dependencies = [
  "iced_core 0.14.0",
  "iced_futures 0.14.0",
  "log",
+]
+
+[[package]]
+name = "iced_dialog"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ac1ce8766cca5304019c4af79352c3fadc5b8ed37b8b614657c33f2146acc35"
+dependencies = [
+ "iced_core 0.14.0",
+ "iced_widget 0.14.2",
 ]
 
 [[package]]

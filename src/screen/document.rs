@@ -49,14 +49,6 @@ pub(crate) mod document {
         pub(crate) fn get_date_added(&self) -> i64 {
             return self.date_added
         }
-
-        pub(crate) fn update(&mut self, message: Message) {
-
-        }
-
-        pub(crate) fn view(&self) -> Element<Message> {
-            Container::new("Document").into()
-        }
     }
 
     pub(crate) enum Message {

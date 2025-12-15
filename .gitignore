@@ -3,3 +3,6 @@
 /temp
 /config.toml
 /data.db
+/data_bak2
+/data_bak.db
+/data_bak2.db
