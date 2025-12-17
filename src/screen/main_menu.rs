@@ -24,7 +24,8 @@ pub(crate) mod main_menu {
                 Image::new(Handle::from_bytes(HOME_IMAGE))
                     .expand(true)
                     .content_fit(iced::ContentFit::Cover)
-            ).align_x(Center).align_y(Center).width(Length::Fill).height(Length::Fill).into()
+                    .border_radius(5.0)
+            ).align_x(Center).align_y(Center).width(Length::Fill).height(Length::Fill).style(container::bordered_box).into()
         }
         
     }

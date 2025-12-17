@@ -1,15 +1,21 @@
+//#![windows_subsystem = "windows"]
 mod db;
 mod screen;
 
 use std::fs;
 use std::path::Path;
 
+use hide_console_ng::hide_console;
 use iced::alignment::Horizontal::Left;
 use iced::{Border, Color, Element, Length, Subscription, Task, Theme};
 use iced::widget::{Button, Column, Container, Text, button, column, container, row, rule};
 use iced_aw::sidebar::TabLabel;
 use iced_aw::style::{card, sidebar};
 use iced_aw::widget::Sidebar;
+use log::LevelFilter;
+use log4rs::append::file::FileAppender;
+use log4rs::config::{Appender, Root};
+use log4rs::encode::pattern::PatternEncoder;
 use screen::main_menu::main_menu;
 use screen::document_list::document_list;
 use screen::settings::settings;
@@ -24,7 +30,22 @@ const HOME_IMAGE: &[u8] = include_bytes!("../home.jpg");
 
 
 pub fn main() -> iced::Result {
+    let logfile = FileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new("{d} [{l}] {m}\n")))
+        .build("doc_manager.log")
+        .unwrap();
+
+    let log_config = log4rs::Config::builder()
+        .appender(Appender::builder().build("logfile", Box::new(logfile)))
+        .build(Root::builder()
+            .appender("logfile")
+            .build(LevelFilter::Error))
+        .unwrap();
+
+    log4rs::init_config(log_config).unwrap();
+
     iced::application(State::new, State::update, State::view)
+    .title("Doc Manager")
     .theme(State::current_theme)
     .subscription(State::subscription)
     .run()
@@ -136,7 +157,8 @@ impl Into<Theme> for LocalTheme {
 
 #[derive(Serialize, Deserialize)]
 struct Config {
-    current_theme: LocalTheme
+    current_theme: LocalTheme,
+    show_console: bool
 }
 
 impl Config {
@@ -161,12 +183,24 @@ impl Config {
     fn current_theme(&self) -> LocalTheme {
         return self.current_theme.clone()
     }
+
+    fn show_console(&self) {
+        match self.show_console {
+            true => {
+                hide_console_ng::show_unconditionally();
+            }
+            false => {
+                hide_console();
+            }
+        }
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            current_theme: LocalTheme::from(Theme::CatppuccinMacchiato)
+            current_theme: LocalTheme::from(Theme::CatppuccinMacchiato),
+            show_console: false
         }
     }
 }
@@ -288,6 +322,18 @@ impl State {
                         self.settings.set_theme(theme.clone());
                         self.document_list.set_current_theme(theme.clone().into());
                     }
+                    settings::Message::ShowConsole(show_console) => {
+                        self.config.show_console = show_console;
+                        self.config.show_console();
+                        let serialized = toml::to_string(&self.config).unwrap_or_else(|err| {
+                            println!("Error serializing config to toml: {}", err);
+                            String::new()
+                        });
+                        fs::write("./config.toml", serialized).unwrap_or_else(|err| {
+                            println!("Error writing to config file: {}", err);
+                        });
+                        return self.settings.update(settings_message).map(Message::Settings)
+                    }
                     settings::Message::Back => {
                         if self.current_tab != self.previous_tab.unwrap() {
                             self.current_tab = self.previous_tab.unwrap_or_else(|| {
@@ -309,6 +355,7 @@ impl State {
     }
 
     fn view(&self) -> Element<Message> {
+        self.config.show_console();
         let screen = match &self.current_tab {
             Tab::Home => self.main_menu.view().map(Message::MainMenu),
             Tab::DocumentList => self.document_list.view().map(Message::DocumentList),
@@ -317,90 +364,8 @@ impl State {
         Container::new(row![
             Container::new(
                 sidebar(self.current_tab)
-                // Sidebar::new(Message::SelectedTab)
-                //     .push(Tab::Home, TabLabel::Text(String::from("Home")))
-                //     .push(Tab::DocumentList, TabLabel::Text(String::from("Document List")))
-                //     .push(Tab::Settings, TabLabel::Text(String::from("Settings")))
-                //     .align_tabs(iced::Alignment::Start)
-                // .set_active_tab(&self.current_tab).spacing(5).width(Length::FillPortion(1)).style(|theme: &Theme, status: iced_aw::style::Status| { 
-                //     match status {
-                //         iced_aw::style::Status::Active => sidebar::Style {
-                //             background: Some(Color::TRANSPARENT.into()),
-                //             border_color: Some(Color::TRANSPARENT),
-                //             border_width: 0.0,
-                //             tab_label_background: theme.extended_palette().background.weak.color.into(),
-                //             tab_label_border_color: Color::TRANSPARENT,
-                //             tab_label_border_width: 0.0,
-                //             icon_color: Default::default(),
-                //             icon_background: Default::default(),
-                //             icon_border_radius: Default::default(),
-                //             text_color: theme.extended_palette().background.base.text.into()
-                //         },
-                //         iced_aw::style::Status::Hovered => sidebar::Style {
-                //             background: Some(Color::TRANSPARENT.into()),
-                //             border_color: Some(Color::TRANSPARENT),
-                //             border_width: 0.0,
-                //             tab_label_background: theme.extended_palette().background.weak.color.into(),
-                //             tab_label_border_color: Color::TRANSPARENT,
-                //             tab_label_border_width: 0.0,
-                //             icon_color: Default::default(),
-                //             icon_background: Default::default(),
-                //             icon_border_radius: Default::default(),
-                //             text_color: theme.extended_palette().background.weak.text.into()
-                //         },
-                //         iced_aw::style::Status::Pressed => sidebar::Style {
-                //             background: Some(Color::TRANSPARENT.into()),
-                //             border_color: Some(Color::TRANSPARENT),
-                //             border_width: 0.0,
-                //             tab_label_background: theme.extended_palette().background.weaker.color.into(),
-                //             tab_label_border_color: Color::TRANSPARENT,
-                //             tab_label_border_width: 0.0,
-                //             icon_color: Default::default(),
-                //             icon_background: Default::default(),
-                //             icon_border_radius: Default::default(),
-                //             text_color: theme.extended_palette().background.weak.text.into()
-                //         },
-                //         iced_aw::style::Status::Disabled => sidebar::Style {
-                //             background: Some(Color::TRANSPARENT.into()),
-                //             border_color: Some(Color::TRANSPARENT),
-                //             border_width: 0.0,
-                //             tab_label_background: Color::TRANSPARENT.into(),
-                //             tab_label_border_color: Color::TRANSPARENT,
-                //             tab_label_border_width: 0.0,
-                //             icon_color: Default::default(),
-                //             icon_background: Default::default(),
-                //             icon_border_radius: Default::default(),
-                //             text_color: theme.extended_palette().background.weak.text.into()
-                //         },
-                //         iced_aw::style::Status::Focused => sidebar::Style {
-                //             background: Some(Color::TRANSPARENT.into()),
-                //             border_color: Some(Color::TRANSPARENT),
-                //             border_width: 0.0,
-                //             tab_label_background: theme.extended_palette().background.weaker.color.into(),
-                //             tab_label_border_color: Color::TRANSPARENT,
-                //             tab_label_border_width: 0.0,
-                //             icon_color: Default::default(),
-                //             icon_background: Default::default(),
-                //             icon_border_radius: Default::default(),
-                //             text_color: theme.extended_palette().background.weak.text.into()
-                //         },
-                //         iced_aw::style::Status::Selected => sidebar::Style {
-                //             background: Some(Color::TRANSPARENT.into()),
-                //             border_color: Some(Color::TRANSPARENT),
-                //             border_width: 0.0,
-                //             tab_label_background: theme.extended_palette().background.weak.color.into(),
-                //             tab_label_border_color: Color::TRANSPARENT,
-                //             tab_label_border_width: 0.0,
-                //             icon_color: Default::default(),
-                //             icon_background: Default::default(),
-                //             icon_border_radius: Default::default(),
-                //             text_color: theme.extended_palette().background.weak.text.into()
-                //         },
-                //     }
-                // }
-                
             ).padding(5),
-            container(screen).width(Length::FillPortion(5))
+            container(screen).padding(5).width(Length::FillPortion(5))
         ]).into()
     }
 

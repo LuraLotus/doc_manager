@@ -1,15 +1,17 @@
 pub(crate) mod settings {
-    use iced::{Alignment::Center, Element, Length, Task, Theme, widget::{Container, Grid, PickList, Text, button, column, container, pick_list, row, rule}};
+    use iced::{Alignment::Center, Element, Length, Task, Theme, alignment::Horizontal::Left, widget::{Container, Grid, PickList, Text, Toggler, button, column, container, pick_list, row, rule, toggler}};
     use iced_aw::Card;
 
     pub(crate) struct Settings {
-        current_theme: Option<Theme>
+        current_theme: Option<Theme>,
+        show_console: bool
     }
 
     impl Settings {
         pub(crate) fn new() -> Settings {
             Settings {
-                current_theme: Some(Theme::CatppuccinMacchiato)
+                current_theme: Some(Theme::CatppuccinMacchiato),
+                show_console: false
             }
         }
 
@@ -19,6 +21,11 @@ pub(crate) mod settings {
                     self.current_theme = Some(theme);
                     Task::none()
                 },
+                Message::ShowConsole(show_console) => {
+                    self.show_console = show_console;
+                    println!("{}", show_console);
+                    Task::none()
+                }
                 Message::Back => Task::none()
             }
         }
@@ -37,8 +44,12 @@ pub(crate) mod settings {
                         Text::new("Theme: ").align_y(Center),
                         PickList::new(Settings::available_themes(), self.current_theme.clone(), Message::ChangeTheme)
                     ].spacing(5).align_y(Center),
+                    // row![
+                    //     Text::new("Show Console: "),
+                    //     Toggler::new(self.show_console).on_toggle(Message::ShowConsole).size(18)
+                    // ].spacing(5).align_y(Center)
                 ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill),
-            ].spacing(5)).padding(5).into()
+            ].spacing(5)).into()
         }
 
         fn available_themes() -> Vec<Theme> {
@@ -61,6 +72,7 @@ pub(crate) mod settings {
     #[derive(Debug, Clone)]
     pub(crate) enum Message {
         ChangeTheme(Theme),
+        ShowConsole(bool),
         Back
     }
 

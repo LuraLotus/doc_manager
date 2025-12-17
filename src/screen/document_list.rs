@@ -3,7 +3,7 @@ pub(crate) mod document_list {
 
     use caesium::{compress_in_memory, convert_in_memory, parameters::{CSParameters, PngParameters}};
     use file_format::FileFormat;
-    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
+    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
     use iced::widget::text_input;
     use iced_aw::{Card, TabBarPosition, TabLabel, Tabs, card::Status, style::card};
     use iced_dialog::dialog;
@@ -38,7 +38,8 @@ pub(crate) mod document_list {
         scanning: bool,
         scan_progress: f32,
         current_theme: Option<LocalTheme>,
-        show_confirm_delete: bool
+        show_confirm_delete: bool,
+        show_empty_field_warning: bool
     }
 
     impl DocumentList {
@@ -68,7 +69,8 @@ pub(crate) mod document_list {
                 scanning: false,
                 scan_progress: f32::default(),
                 current_theme: None,
-                show_confirm_delete: false
+                show_confirm_delete: false,
+                show_empty_field_warning: false
             }
         }
 
@@ -84,26 +86,32 @@ pub(crate) mod document_list {
                     Task::none()
                 },
                 Message::SaveNewDocument => {
-                    let mut conn = DbConnection::new();
-                    conn.new_document(
-                        self.current_document_number.clone(),
-                        self.current_document_type.clone(), 
-                        self.current_comment.clone()
-                    ).unwrap_or_else(|err| {
-                        println!("Error adding new document: {}", err);
-                        0
-                    });
+                    if self.current_document_number.is_empty() {
+                        self.show_empty_field_warning = true;
+                    }
+                    else {
+                        let mut conn = DbConnection::new();
+                        conn.new_document(
+                            self.current_document_number.clone(),
+                            self.current_document_type.clone(), 
+                            self.current_comment.clone()
+                        ).unwrap_or_else(|err| {
+                            println!("Error adding new document: {}", err);
+                            0
+                        });
 
-                    self.reset_state();
-                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
-                    self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == conn.get_last_rowid().unwrap() as u32).cloned();
-                    self.current_document_number = self.current_open_document.as_ref().unwrap().get_document_number().to_string();
-                    self.current_document_type = self.current_open_document.as_ref().unwrap().get_document_type().to_string();
-                    self.current_comment = self.current_open_document.as_ref().unwrap().get_comment().to_string();
-                    let file_path = format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_id());
-                    fs::create_dir(file_path).unwrap_or_else(|err| {
-                        println!("Error creating document's attachment folder: {}", err);
-                    });
+                        self.reset_state();
+                        self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                        self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == conn.get_last_rowid().unwrap() as u32).cloned();
+                        self.current_document_number = self.current_open_document.as_ref().unwrap().get_document_number().to_string();
+                        self.current_document_type = self.current_open_document.as_ref().unwrap().get_document_type().to_string();
+                        self.current_comment = self.current_open_document.as_ref().unwrap().get_comment().to_string();
+                        let file_path = format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_id());
+                        fs::create_dir(file_path).unwrap_or_else(|err| {
+                            println!("Error creating document's attachment folder: {}", err);
+                        });
+                    }
+                    
                     Task::none()
                 },
                 Message::OpenDocument(document) => {
@@ -114,21 +122,27 @@ pub(crate) mod document_list {
                     Task::none()
                 }
                 Message::SaveCurrentDocument => {
-                    let mut conn=  DbConnection::new();
-                    let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
-                    conn.edit_document_details(
-                        current_document_id,
-                        self.current_document_number.clone(),
-                        self.current_document_type.clone(),
-                        self.current_comment.clone()
-                    ).unwrap_or_else(|err| {
-                        println!("Error editing document: {}", err);
-                        0
-                    });
+                    if self.current_document_number.is_empty() {
+                        self.show_empty_field_warning = true;
+                    }
+                    else {
+                        let mut conn=  DbConnection::new();
+                        let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
+                        conn.edit_document_details(
+                            current_document_id,
+                            self.current_document_number.clone(),
+                            self.current_document_type.clone(),
+                            self.current_comment.clone()
+                        ).unwrap_or_else(|err| {
+                            println!("Error editing document: {}", err);
+                            0
+                        });
 
-                    self.reset_state();
-                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
-                    self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
+                        self.reset_state();
+                        self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                        self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
+                    }
+                    
                     Task::none()
                 }
                 Message::SwitchTab(tab) => {
@@ -195,133 +209,21 @@ pub(crate) mod document_list {
                     Task::none()
                 },
                 Message::SaveNewAttachment => {
-                    let mut conn = DbConnection::new();
-                    let current_document_id = self.current_open_document.clone().unwrap().get_document_id();
-                    
-                    conn.new_attachment(String::new(), self.current_attachment_reference_number.clone(), self.current_attachment_comment.clone(), current_document_id).unwrap_or_else(|err| {
-                        println!("Error creating new attachment: {}", err);
-                        0
-                    });
-
-                    let file_name = format!("{}_{}.png", current_document_id, conn.get_last_rowid().unwrap());
-
-                    let file_path = format!("./data/{}/{}", current_document_id, file_name);
-
-                    if self.file_scanned {
-                        let mut bytes = self.current_file_bytes.clone().unwrap_or_else(|| {
-                            println!("Current file bytes is none");
-                            Vec::new()
-                        });
-
-                        if FileFormat::from_bytes(&bytes).extension() != "png" {
-                            let img = image::load_from_memory(&bytes);
-                            match img.unwrap().write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png) {
-                                Err(err) => println!("Error converting image format: {}", err),
-                                _ => {}
-                            }
-                        }
-                        let parameters = CSParameters::new();
-                        let compressed_bytes = compress_in_memory(bytes, &parameters).unwrap_or_else(|err| {
-                            println!("Error compressing image: {}", err);
-                            Vec::new()
-                        });
-
-                        fs::write(file_path.clone(), compressed_bytes).unwrap_or_else(|err| {
-                            println!("Error writing bytes to file: {}", err);
-                        });
+                    if self.current_attachment_reference_number.is_empty() || self.current_file_path.is_none() {
+                        self.show_empty_field_warning = true;
                     }
                     else {
-                        let mut bytes = fs::read(self.current_file_path.clone().unwrap_or_else(|| {
-                            println!("Error reading file from path");
-                            String::new()
-                        })).unwrap_or_else(|err| {
-                            println!("Error reading file from path: {}", err);
-                            Vec::new()
+                        let mut conn = DbConnection::new();
+                        let current_document_id = self.current_open_document.clone().unwrap().get_document_id();
+                        
+                        conn.new_attachment(String::new(), self.current_attachment_reference_number.clone(), self.current_attachment_comment.clone(), current_document_id).unwrap_or_else(|err| {
+                            println!("Error creating new attachment: {}", err);
+                            0
                         });
 
-                        if FileFormat::from_bytes(&bytes).extension() != "png" {
-                            let img = image::load_from_memory(&bytes);
-                            match img.unwrap().write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png) {
-                                Err(err) => println!("Error converting image format: {}", err),
-                                _ => {}
-                            }
-                        }
-                        let mut parameters = CSParameters::new();
-                        parameters.png.quality = 100;
-                        parameters.png.optimize = true;
-                        parameters.png.optimization_level = 6;
-                        let compressed_bytes = compress_in_memory(bytes, &parameters).unwrap_or_else(|err| {
-                            println!("Error compressing image: {}", err);
-                            Vec::new()
-                        });
-
-                        fs::write(&file_path, compressed_bytes).unwrap_or_else(|err| {
-                            println!("Error writing file to data folder: {}", err);
-                        });
-                    }
-
-                    conn.edit_attachment_file_path(conn.get_last_rowid().unwrap() as u32, file_path).unwrap_or_else(|err| {
-                        println!("Error editing attachment file path: {}", err);
-                        0
-                    });
-
-                    self.reset_attachment_state();
-                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
-                    self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
-                    self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == conn.get_last_rowid().unwrap() as u32).cloned();
-                    self.current_attachment_reference_number = self.current_open_attachment.as_ref().unwrap().get_reference_number().to_string();
-                    self.current_attachment_comment = self.current_open_attachment.as_ref().unwrap().get_comment().to_string();
-                    self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
-                    self.current_file = Some(Handle::from_path(self.current_file_path.as_ref().unwrap()));
-                    Task::none()
-                    
-                },
-                Message::OpenAttachment(attachment) => {
-                    self.current_open_attachment = Some(attachment.clone());
-                    self.current_attachment_reference_number = attachment.clone().get_reference_number().to_string();
-                    self.current_attachment_comment = attachment.clone().get_comment().to_string();
-                    self.current_file_path = Some(attachment.as_ref().get_file_path().to_string());
-                    if let Some(file_path) = &self.current_file_path {
-                        match fs::read(file_path) {
-                            Ok(bytes) => {
-                                self.current_file = Some(Handle::from_bytes(bytes));
-                            }
-                            Err(err) => {
-                                println!("Error reading file: {}", err);
-                                self.current_file = Some(Handle::from_bytes(ERROR_FERRIS));
-                            }
-                        }
-                    }
-                    Task::none()
-                },
-                Message::SaveCurrentAttachment => {
-                    let mut conn = DbConnection::new();
-                    let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
-                    let current_attachment_id = self.current_open_attachment.as_ref().unwrap().get_attachment_id();
-                    
-                    conn.edit_attachment_details(
-                        current_attachment_id,
-                        self.current_attachment_reference_number.clone(),
-                        self.current_attachment_comment.clone()
-                    ).unwrap_or_else(|err| {
-                        println!("Error editing attachment: {}", err);
-                        0
-                    });
-
-                    if self.file_path_changed {
-                        let file_format = FileFormat::from_file(self.current_file_path.as_ref().unwrap()).unwrap_or_else(|err| {
-                            println!("Error checking file format: {}", err);
-                            FileFormat::Empty
-                        });
-
-
-                        let file_name = format!("{}_{}.png", current_document_id, current_attachment_id);
+                        let file_name = format!("{}_{}.png", current_document_id, conn.get_last_rowid().unwrap());
 
                         let file_path = format!("./data/{}/{}", current_document_id, file_name);
-
-                        fs::remove_file(self.current_open_attachment.as_ref().unwrap().clone().get_file_path().to_string()).unwrap_or_else(|err| {
-                            println!("Error deleting old file: {}", err);
-                        });
 
                         if self.file_scanned {
                             let mut bytes = self.current_file_bytes.clone().unwrap_or_else(|| {
@@ -362,7 +264,10 @@ pub(crate) mod document_list {
                                     _ => {}
                                 }
                             }
-                            let parameters = CSParameters::new();
+                            let mut parameters = CSParameters::new();
+                            parameters.png.quality = 100;
+                            parameters.png.optimize = true;
+                            parameters.png.optimization_level = 6;
                             let compressed_bytes = compress_in_memory(bytes, &parameters).unwrap_or_else(|err| {
                                 println!("Error compressing image: {}", err);
                                 Vec::new()
@@ -373,19 +278,132 @@ pub(crate) mod document_list {
                             });
                         }
 
-                        conn.edit_attachment_file_path(current_attachment_id, file_path).unwrap_or_else(|err| {
+                        conn.edit_attachment_file_path(conn.get_last_rowid().unwrap() as u32, file_path).unwrap_or_else(|err| {
                             println!("Error editing attachment file path: {}", err);
                             0
                         });
 
-                        self.file_path_changed = false;
+                        self.reset_attachment_state();
+                        self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                        self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
+                        self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == conn.get_last_rowid().unwrap() as u32).cloned();
+                        self.current_attachment_reference_number = self.current_open_attachment.as_ref().unwrap().get_reference_number().to_string();
+                        self.current_attachment_comment = self.current_open_attachment.as_ref().unwrap().get_comment().to_string();
+                        self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
+                        self.current_file = Some(Handle::from_path(self.current_file_path.as_ref().unwrap()));
+                    }
+                    Task::none()
+                },
+                Message::OpenAttachment(attachment) => {
+                    self.current_open_attachment = Some(attachment.clone());
+                    self.current_attachment_reference_number = attachment.clone().get_reference_number().to_string();
+                    self.current_attachment_comment = attachment.clone().get_comment().to_string();
+                    self.current_file_path = Some(attachment.as_ref().get_file_path().to_string());
+                    if let Some(file_path) = &self.current_file_path {
+                        match fs::read(file_path) {
+                            Ok(bytes) => {
+                                self.current_file = Some(Handle::from_bytes(bytes));
+                            }
+                            Err(err) => {
+                                println!("Error reading file: {}", err);
+                                self.current_file = Some(Handle::from_bytes(ERROR_FERRIS));
+                            }
+                        }
+                    }
+                    Task::none()
+                },
+                Message::SaveCurrentAttachment => {
+                    if self.current_attachment_reference_number.is_empty() {
+                        self.show_empty_field_warning = true;
+                    }
+                    else {
+                        let mut conn = DbConnection::new();
+                        let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
+                        let current_attachment_id = self.current_open_attachment.as_ref().unwrap().get_attachment_id();
+                        
+                        conn.edit_attachment_details(
+                            current_attachment_id,
+                            self.current_attachment_reference_number.clone(),
+                            self.current_attachment_comment.clone()
+                        ).unwrap_or_else(|err| {
+                            println!("Error editing attachment: {}", err);
+                            0
+                        });
+
+                        if self.file_path_changed {
+                            let file_name = format!("{}_{}.png", current_document_id, current_attachment_id);
+
+                            let file_path = format!("./data/{}/{}", current_document_id, file_name);
+
+                            fs::remove_file(self.current_open_attachment.as_ref().unwrap().clone().get_file_path().to_string()).unwrap_or_else(|err| {
+                                println!("Error deleting old file: {}", err);
+                            });
+
+                            if self.file_scanned {
+                                let mut bytes = self.current_file_bytes.clone().unwrap_or_else(|| {
+                                    println!("Current file bytes is none");
+                                    Vec::new()
+                                });
+
+                                if FileFormat::from_bytes(&bytes).extension() != "png" {
+                                    let img = image::load_from_memory(&bytes);
+                                    match img.unwrap().write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png) {
+                                        Err(err) => println!("Error converting image format: {}", err),
+                                        _ => {}
+                                    }
+                                }
+                                let parameters = CSParameters::new();
+                                let compressed_bytes = compress_in_memory(bytes, &parameters).unwrap_or_else(|err| {
+                                    println!("Error compressing image: {}", err);
+                                    Vec::new()
+                                });
+
+                                fs::write(file_path.clone(), compressed_bytes).unwrap_or_else(|err| {
+                                    println!("Error writing bytes to file: {}", err);
+                                });
+                            }
+                            else {
+                                let mut bytes = fs::read(self.current_file_path.clone().unwrap_or_else(|| {
+                                    println!("Error reading file from path");
+                                    String::new()
+                                })).unwrap_or_else(|err| {
+                                    println!("Error reading file from path: {}", err);
+                                    Vec::new()
+                                });
+
+                                if FileFormat::from_bytes(&bytes).extension() != "png" {
+                                    let img = image::load_from_memory(&bytes);
+                                    match img.unwrap().write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png) {
+                                        Err(err) => println!("Error converting image format: {}", err),
+                                        _ => {}
+                                    }
+                                }
+                                let parameters = CSParameters::new();
+                                let compressed_bytes = compress_in_memory(bytes, &parameters).unwrap_or_else(|err| {
+                                    println!("Error compressing image: {}", err);
+                                    Vec::new()
+                                });
+
+                                fs::write(&file_path, compressed_bytes).unwrap_or_else(|err| {
+                                    println!("Error writing file to data folder: {}", err);
+                                });
+                            }
+
+                            conn.edit_attachment_file_path(current_attachment_id, file_path).unwrap_or_else(|err| {
+                                println!("Error editing attachment file path: {}", err);
+                                0
+                            });
+
+                            self.file_path_changed = false;
+                        }
+
+                        self.reset_attachment_state();
+                        self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                        self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
+                        self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == current_attachment_id).cloned();
+                        self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
                     }
 
-                    self.reset_attachment_state();
-                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
-                    self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
-                    self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == current_attachment_id).cloned();
-                    self.current_file_path = Some(self.current_open_attachment.as_ref().unwrap().get_file_path().to_string());
                     Task::none()
                 },
                 Message::CurrentAttachmentReferenceNumberChange(input) => {
@@ -531,7 +549,10 @@ pub(crate) mod document_list {
                 },
                 Message::DeleteAttachment => {
                     let mut conn = DbConnection::new();
-                    conn.delete_attachment(self.current_open_attachment.as_ref().unwrap().get_attachment_id());
+                    match conn.delete_attachment(self.current_open_attachment.as_ref().unwrap().get_attachment_id()) {
+                        Ok(_) => {},
+                        Err(err) => println!("Error deleting attachment: {}", err)
+                    }
                     match fs::remove_file(self.current_file_path.as_ref().unwrap()) {
                         Err(err) => println!("Error deleting file: {}", err),
                         Ok(_) => {}
@@ -577,10 +598,6 @@ pub(crate) mod document_list {
                 document_cards.push(DataCard::new(Some(document.clone()), None, self.current_theme.clone().unwrap()));
             }
 
-            for card in document_cards.iter() {
-                
-            }
-            
             match &self.current_open_document {
                 None => {
                     match self.create_new_document {
@@ -597,21 +614,29 @@ pub(crate) mod document_list {
                                     ].spacing(5).align_y(Center),
                                     rule::horizontal(2),
                                     row![
-                                        Text::new("Document Number: ").width(Length::FillPortion(1)), 
-                                        text_input("", &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).id(self.input1_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
+                                        row![
+                                            Text::new("Document Number "),
+                                            Text::new("*").color(Color::from_rgb(1.0, 0.0, 0.0))
+                                        ].width(Length::FillPortion(1)),
+                                        if self.show_empty_field_warning && self.current_document_number.is_empty() {
+                                            text_input("", &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).id(self.input1_id.as_ref().unwrap().clone()).width(Length::FillPortion(4)).style(|theme, _| empty_text_input_warning(theme))
+                                        }
+                                        else {
+                                            text_input("", &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).id(self.input1_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
+                                        }
                                     ].spacing(5).align_y(Center),
                                     row![
-                                        Text::new("Document Type: ").width(Length::FillPortion(1)), 
+                                        Text::new("Document Type").width(Length::FillPortion(1)), 
                                         text_input("", &self.current_document_type).on_input(Message::CurrentDocumentTypeChange).id(self.input2_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
                                     ].spacing(5).align_y(Center),
                                     row![
-                                        Text::new("Comment: ").width(Length::FillPortion(1)), 
+                                        Text::new("Comment").width(Length::FillPortion(1)), 
                                         text_input("", &self.current_comment).on_input(Message::CurrentCommentChange).id(self.input3_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
                                     ].spacing(5).align_y(Center)
                                 ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
                                 
                             ].spacing(5)
-                            ).height(Length::Fill).width(Length::Fill).padding(5).into()
+                            ).height(Length::Fill).width(Length::Fill).into()
                         }
                         // Main Document List Screen
                         false => {
@@ -639,7 +664,7 @@ pub(crate) mod document_list {
                                     ).spacing(10).wrap()),
                                 ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
                             ].spacing(5)
-                            ).width(Length::Fill).height(Length::Fill).padding(5).into()
+                            ).width(Length::Fill).height(Length::Fill).into()
                         }
                     }
                 }
@@ -677,15 +702,23 @@ pub(crate) mod document_list {
                                         ].spacing(5).align_y(Center),
                                         rule::horizontal(2),
                                         row![
-                                            Text::new("Document Number: ").width(Length::FillPortion(1)), 
-                                            text_input(&document.get_document_number().to_string(), &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).width(Length::FillPortion(4)).id(self.input1_id.as_ref().unwrap().clone())
+                                            row![
+                                                Text::new("Document Number "),
+                                                Text::new("*").color(Color::from_rgb(1.0, 0.0, 0.0))
+                                            ].width(Length::FillPortion(1)),
+                                            if self.show_empty_field_warning && self.current_document_number.is_empty() {
+                                                text_input(&document.get_document_number().to_string(), &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).width(Length::FillPortion(4)).id(self.input1_id.as_ref().unwrap().clone()).style(|theme, _| empty_text_input_warning(theme))
+                                            }
+                                            else {
+                                                text_input(&document.get_document_number().to_string(), &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).width(Length::FillPortion(4)).id(self.input1_id.as_ref().unwrap().clone())
+                                            }
                                         ].spacing(5).align_y(Center),
                                         row![
-                                            Text::new("Document Type: ").width(Length::FillPortion(1)), 
+                                            Text::new("Document Type").width(Length::FillPortion(1)), 
                                             text_input(&document.get_document_type().to_string(), &self.current_document_type).on_input(Message::CurrentDocumentTypeChange).width(Length::FillPortion(4)).id(self.input2_id.as_ref().unwrap().clone())
                                         ].spacing(5).align_y(Center),
                                         row![
-                                            Text::new("Comment: ").width(Length::FillPortion(1)), 
+                                            Text::new("Comment").width(Length::FillPortion(1)), 
                                             text_input(&document.get_comment().to_string(), &self.current_comment).on_input(Message::CurrentCommentChange).width(Length::FillPortion(4)).id(self.input3_id.as_ref().unwrap().clone())
                                         ].spacing(5).align_y(Center),
                                         
@@ -716,16 +749,33 @@ pub(crate) mod document_list {
                                                         rule::horizontal(2),
                                                         row![
                                                             Container::new(column![
-                                                                Text::new("Attachment Number: "), 
-                                                                text_input("", &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).id(self.input1_id.as_ref().unwrap().clone()),
-                                                                Text::new("Comment: "), 
-                                                                text_input("", &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange).id(self.input2_id.as_ref().unwrap().clone()),
-                                                                Text::new("File: "),
                                                                 row![
-                                                                    text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
-                                                                        println!("No currently selected file.");
-                                                                        String::new()
-                                                                    })),
+                                                                        Text::new("Attachment Number "),
+                                                                        Text::new("*").color(Color::from_rgb(1.0, 0.0, 0.0))
+                                                                    ].width(Length::FillPortion(1)),
+                                                                if self.show_empty_field_warning && self.current_attachment_reference_number.is_empty() {
+                                                                    text_input("", &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).id(self.input1_id.as_ref().unwrap().clone()).style(|theme, _| empty_text_input_warning(theme))
+                                                                }
+                                                                else {
+                                                                    text_input("", &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).id(self.input1_id.as_ref().unwrap().clone())
+                                                                },
+                                                                Text::new("Comment"), 
+                                                                text_input("", &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange).id(self.input2_id.as_ref().unwrap().clone()),
+                                                                row![
+                                                                    Text::new("Image File "),
+                                                                    Text::new("*").color(Color::from_rgb(1.0, 0.0, 0.0))
+                                                                ].width(Length::FillPortion(1)),
+                                                                row![
+                                                                    if self.show_empty_field_warning && self.current_file_path.is_none() {
+                                                                        text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
+                                                                            String::new()
+                                                                        })).style(|theme, _| empty_text_input_warning(theme))
+                                                                    }
+                                                                    else {
+                                                                        text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
+                                                                            String::new()
+                                                                        }))
+                                                                    },
                                                                     button("Select").on_press(Message::OpenFileDialog),
                                                                     button("Scan").on_press(Message::Scan)
                                                                 ].spacing(5).width(Length::FillPortion(4))
@@ -800,16 +850,33 @@ pub(crate) mod document_list {
                                                 rule::horizontal(2),
                                                 row![
                                                     Container::new(column![
-                                                        Text::new("Attachment Number: "), 
-                                                        text_input(&attachment.get_reference_number().to_string(), &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).id(self.input1_id.as_ref().unwrap().clone()),
-                                                        Text::new("Comment: "), 
-                                                        text_input(&attachment.get_comment().to_string(), &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange).id(self.input2_id.as_ref().unwrap().clone()),
-                                                        Text::new("File: "),
                                                         row![
-                                                            text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
-                                                                println!("No currently selected file.");
-                                                                String::new()
-                                                            })),
+                                                            Text::new("Attachment Number "),
+                                                            Text::new("*").color(Color::from_rgb(1.0, 0.0, 0.0))
+                                                        ].width(Length::FillPortion(1)),
+                                                        if self.show_empty_field_warning && self.current_attachment_reference_number.is_empty() {
+                                                            text_input(&attachment.get_reference_number().to_string(), &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).id(self.input1_id.as_ref().unwrap().clone()).style(|theme, _| empty_text_input_warning(theme))
+                                                        }
+                                                        else {
+                                                            text_input(&attachment.get_reference_number().to_string(), &self.current_attachment_reference_number).on_input(Message::CurrentAttachmentReferenceNumberChange).id(self.input1_id.as_ref().unwrap().clone())
+                                                        },
+                                                        Text::new("Comment"), 
+                                                        text_input(&attachment.get_comment().to_string(), &self.current_attachment_comment).on_input(Message::CurrentAttachmentCommentChange).id(self.input2_id.as_ref().unwrap().clone()),
+                                                        row![
+                                                            Text::new("Image File "),
+                                                            Text::new("*").color(Color::from_rgb(1.0, 0.0, 0.0))
+                                                        ].width(Length::FillPortion(1)),
+                                                        row![
+                                                            if self.show_empty_field_warning && self.current_file_path.is_none() {
+                                                                text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
+                                                                    String::new()
+                                                                })).style(|theme, _| empty_text_input_warning(theme))
+                                                            }
+                                                            else {
+                                                                text_input("", &self.current_file_path.clone().unwrap_or_else(|| {
+                                                                    String::new()
+                                                                }))
+                                                            },
                                                             button("Select").on_press(Message::OpenFileDialog),
                                                             button("Scan").on_press(Message::Scan)
                                                         ].spacing(5).width(Length::FillPortion(4)),
@@ -839,7 +906,7 @@ pub(crate) mod document_list {
                                 .set_active_tab(&self.current_document_tab)
                                 .height(Length::Shrink)
                         )
-                    ].spacing(5)).padding(5).into()
+                    ].spacing(5)).into()
                 }
             }
         }
@@ -883,6 +950,7 @@ pub(crate) mod document_list {
             self.create_new_document = false;
             self.create_new_attachment = false;
             self.show_confirm_delete = false;
+            self.show_empty_field_warning = false;
         }
 
         fn reset_attachment_state(&mut self) {
@@ -899,6 +967,7 @@ pub(crate) mod document_list {
             self.scan_progress = 0.0;
             self.create_new_attachment = false;
             self.show_confirm_delete = false;
+            self.show_empty_field_warning = false;
         }
     }
 
@@ -972,6 +1041,17 @@ pub(crate) mod document_list {
             foot_background: Color::TRANSPARENT.into(),
             foot_text_color: theme.extended_palette().background.base.text.into(),
             close_color: Default::default(),
+        }
+    }
+
+    fn empty_text_input_warning(theme: &Theme) -> text_input::Style {
+        text_input::Style {
+            border: Border {
+                color: Color::from_rgb(1.0, 0.0, 0.0),
+                width: 2.0,
+                radius: text_input::default(theme, text_input::Status::Active).border.radius
+            },
+            ..text_input::default(theme, text_input::Status::Active)
         }
     }
 

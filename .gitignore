@@ -2,7 +2,8 @@
 /data
 /temp
 /config.toml
-/data.db
+data.db
 /data_bak2
-/data_bak.db
-/data_bak2.db
+data_bak.db
+data_bak2.db
+doc_manager.log
