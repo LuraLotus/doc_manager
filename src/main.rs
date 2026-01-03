@@ -1,6 +1,9 @@
 //#![windows_subsystem = "windows"]
 mod db;
 mod screen;
+mod document;
+mod attachment;
+mod attachment_page;
 
 use std::fs;
 use std::path::Path;
@@ -21,7 +24,7 @@ use screen::document_list::document_list;
 use screen::settings::settings;
 use serde::{Deserialize, Serialize};
 
-use crate::screen::{MainMenu, document};
+use crate::screen::{MainMenu};
 use crate::screen::DocumentList;
 use crate::screen::Settings;
 

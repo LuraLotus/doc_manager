@@ -1,6 +1,6 @@
 [package]
 name = "doc_manager"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
@@ -16,8 +16,9 @@ image = "0.25.9"
 libcaesium = "0.20.0"
 log = "0.4.29"
 log4rs = "1.4.0"
+pdfium-render = { version = "0.8.37", features = ["image"] }
 rfd = "0.16.0"
-rusqlite = "0.37.0"
+rusqlite = { version = "0.37.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 time = { version = "0.3.44", features = ["formatting", "local-offset", "macros", "parsing"] }
 toml = "0.9.8"
