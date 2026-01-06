@@ -1189,6 +1189,11 @@ pub(crate) mod document_list {
         }
 
         document.save_to_file(&path).expect("Error saving to PDF");
+        reveal_file(&path);
+    }
+
+    fn reveal_file(path: &PathBuf) {
+        opener::reveal(path).expect("Error revealing file");
     }
 
     #[derive(Debug, Clone)]

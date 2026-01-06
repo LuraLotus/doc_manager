@@ -1,4 +1,4 @@
-//#![windows_subsystem = "windows"]
+#![windows_subsystem = "windows"]
 mod db;
 mod screen;
 mod document;
@@ -7,11 +7,14 @@ mod attachment_page;
 
 use std::fs;
 use std::path::Path;
+use std::time::Instant;
 
 use hide_console_ng::hide_console;
 use iced::alignment::Horizontal::Left;
 use iced::{Border, Color, Element, Length, Subscription, Task, Theme};
 use iced::widget::{Button, Column, Container, Text, button, column, container, row, rule};
+use iced_anim::animated::Mode;
+use iced_anim::{Animated, Animation, AnimationBuilder, Easing};
 use iced_aw::sidebar::TabLabel;
 use iced_aw::style::{card, sidebar};
 use iced_aw::widget::Sidebar;
@@ -214,7 +217,8 @@ struct State {
     document_list: DocumentList,
     settings: Settings,
     config: Config,
-    previous_tab: Option<Tab>
+    previous_tab: Option<Tab>,
+    sidebar_button_color: Color
 }
 
 impl State {
@@ -255,7 +259,8 @@ impl State {
             document_list: DocumentList::new(),
             settings,
             config,
-            previous_tab: None
+            previous_tab: None,
+            sidebar_button_color: Color::default()
         }
     }
 
@@ -367,9 +372,9 @@ impl State {
         Container::new(row![
             Container::new(
                 sidebar(self.current_tab)
-            ).padding(5),
-            container(screen).padding(5).width(Length::FillPortion(5))
-        ]).into()
+            ).width(Length::FillPortion(1)),
+            container(screen).width(Length::FillPortion(5))
+        ].spacing(5)).padding(5).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -425,32 +430,36 @@ fn sidebar(selected_tab: Tab) -> Element<'static, Message> {
                 }
             )
         ].spacing(5).align_x(Left)
-    ).width(Length::FillPortion(1)).into()
+    ).into()
 }
 
 fn sidebar_button_style(theme: &Theme, status: iced::widget::button::Status) -> iced::widget::button::Style {
     match status {
-        button::Status::Active => iced::widget::button::Style {
-            text_color: theme.extended_palette().background.weak.text.into(),
-            background: Some(Color::TRANSPARENT.into()),
-            border: Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
-                radius: 5.0.into()
-            },
-            shadow: Default::default(),
-            snap: true
+        button::Status::Active => {
+            iced::widget::button::Style {
+                text_color: theme.extended_palette().background.weak.text.into(),
+                background: Some(Color::TRANSPARENT.into()),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 5.0.into()
+                },
+                shadow: Default::default(),
+                snap: false
+            }
         },
-        button::Status::Hovered => iced::widget::button::Style {
-            text_color: theme.extended_palette().background.weakest.text.into(),
-            background: Some(theme.extended_palette().background.weakest.color.into()),
-            border: Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
-                radius: 5.0.into()
-            },
-            shadow: Default::default(),
-            snap: true
+        button::Status::Hovered => {
+            iced::widget::button::Style {
+                text_color: theme.extended_palette().background.weakest.text.into(),
+                background: Some(theme.extended_palette().background.weakest.color.into()),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 5.0.into()
+                },
+                shadow: Default::default(),
+                snap: false
+            }
         },
         button::Status::Pressed => iced::widget::button::Style {
             text_color: theme.extended_palette().background.weaker.text.into(),
@@ -461,7 +470,7 @@ fn sidebar_button_style(theme: &Theme, status: iced::widget::button::Status) -> 
                 radius: 5.0.into()
             },
             shadow: Default::default(),
-            snap: true
+            snap: false
         },
         button::Status::Disabled => iced::widget::button::Style {
             text_color: theme.extended_palette().background.strong.text.into(),
@@ -472,7 +481,7 @@ fn sidebar_button_style(theme: &Theme, status: iced::widget::button::Status) -> 
                 radius: 5.0.into()
             },
             shadow: Default::default(),
-            snap: true
+            snap: false
         },
     }
 }
@@ -487,7 +496,7 @@ fn sidebar_button_selected_style(theme: &Theme) -> iced::widget::button::Style {
             radius: 5.0.into()
         },
         shadow: Default::default(),
-        snap: true
+        snap: false
     }
 }
 
