@@ -5,7 +5,7 @@ pub(crate) mod document_list {
     use file_format::FileFormat;
     use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
     use iced::widget::text_input;
-    use iced_aw::{Card, TabBarPosition, TabLabel, Tabs, card::Status, style::card};
+    use iced_aw::{Card, Spinner, TabBarPosition, TabLabel, Tabs, card::Status, style::card};
     use iced_dialog::dialog;
     use image::{DynamicImage, ImageBuffer};
     use pdfium_render::prelude::{PdfBitmap, PdfBitmapFormat, PdfPageImageObject, PdfPageObjectsCommon, PdfPageOrientation, PdfPagePaperSize, PdfPageRenderRotation, PdfPoints, PdfRenderConfig, Pdfium, PdfiumError, PdfiumLibraryBindings};
@@ -36,7 +36,6 @@ pub(crate) mod document_list {
         scanned_file_bytes: Option<Vec<Vec<u8>>>,
         current_file_bytes: Option<Vec<Vec<u8>>>,
         current_file_handles: Option<Vec<Handle>>,
-        current_file: Option<Handle>,
         current_page_index: usize,
         file_scanned: bool,
         files_changed: bool,
@@ -71,7 +70,6 @@ pub(crate) mod document_list {
                 selected_file_bytes: None,
                 scanned_file_bytes: None,
                 current_file_handles: None,
-                current_file: None,
                 current_file_bytes: None,
                 current_page_index: 0,
                 file_scanned: false,
@@ -104,6 +102,7 @@ pub(crate) mod document_list {
                     }
                     else {
                         let mut conn = DbConnection::new();
+                        self.current_document_number = self.current_document_number.trim().to_string();
                         conn.new_document(
                             self.current_document_number.clone(),
                             self.current_document_type.clone(), 
@@ -141,6 +140,7 @@ pub(crate) mod document_list {
                     else {
                         let mut conn=  DbConnection::new();
                         let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
+                        self.current_document_number = self.current_document_number.trim().to_string();
                         conn.edit_document_details(
                             current_document_id,
                             self.current_document_number.clone(),
@@ -239,6 +239,7 @@ pub(crate) mod document_list {
                         self.show_empty_field_warning = true;
                     }
                     else {
+                        self.current_attachment_reference_number = self.current_attachment_reference_number.trim().to_string();
                         let file_path = format!("./data/{}/{}", self.current_open_document.as_ref().unwrap().get_document_number(), self.current_attachment_reference_number);
                         fs::create_dir(&file_path).unwrap_or_else(|err| {
                             println!("Error creating document's attachment folder: {}", err);
@@ -315,6 +316,8 @@ pub(crate) mod document_list {
                         for page in self.current_open_attachment.as_ref().unwrap().pages() {
                             old_file_paths.push(page.file_path().to_string());
                         }
+
+                        self.current_attachment_reference_number = self.current_attachment_reference_number.trim().to_string();
                         
                         conn.edit_attachment_details(
                             current_attachment_id,
@@ -415,7 +418,7 @@ pub(crate) mod document_list {
                 },
                 Message::Scan => {
                     self.scanning = true;
-                    self.scan_progress = 0.0;
+                    self.scan_progress = 0.3;
                     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                     let temp_path = std::env::temp_dir().join("temp").join(format!("scan_{}.png", time));
                     if let Some(parent) = temp_path.parent() {
@@ -446,8 +449,11 @@ pub(crate) mod document_list {
                                 "#,
                                 temp_path.to_string_lossy()
                             );
+                            
 
                             let output = std::process::Command::new("powershell.exe")
+                                .arg("-WindowStyle")
+                                .arg("Hidden")
                                 .arg("-NoProfile")
                                 .arg("-ExecutionPolicy")
                                 .arg("Bypass")
@@ -475,7 +481,7 @@ pub(crate) mod document_list {
 
                         move |path| {
                             if path.is_empty() {
-                                Message::None
+                                Message::ScanFail
                             }
                             else {
                                 Message::Scanned(path.into())
@@ -491,12 +497,17 @@ pub(crate) mod document_list {
                             self.file_scanned = true;
                             self.files_changed = true;
                             self.data_changed = true;
-                            self.add_file_bytes(bytes);
+                            let mut converted_bytes: Vec<u8> = Vec::new();
+                            let scanned = image::load_from_memory(&bytes);
+                            match scanned.unwrap().write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
+                                    Err(err) => println!("Error converting scanned image format: {}", err),
+                                    _ => {}
+                                }
+                            self.add_file_bytes(converted_bytes);
                             self.update_file_handles();
                         },
                         Err(err) => {
                             println!("Error reading scanned image: {}", err);
-                            self.current_file = Some(Handle::from_bytes(ERROR_FERRIS));
                             self.current_file_path = None;
                         }
                     }
@@ -510,9 +521,8 @@ pub(crate) mod document_list {
                 },
                 Message::ScanTick => {
                     if self.scanning {
-                        self.scan_progress += 0.02;
-                        if self.scan_progress > 1.0 {
-                            self.scan_progress = 0.0;
+                        if self.scan_progress < 0.9 {
+                            self.scan_progress += 0.01;
                         }
                     }
                     Task::none()
@@ -790,19 +800,34 @@ pub(crate) mod document_list {
                                                                             text_input("", &self.current_file_handles.as_ref().unwrap().len().to_string())
                                                                         }
                                                                     },
-                                                                    button("Select").on_press(Message::OpenFileDialog),
-                                                                    button("Scan").on_press(Message::Scan)
+                                                                    if self.scanning {
+                                                                        row![
+                                                                            button("Select"),
+                                                                            button(Spinner::new())
+                                                                        ].spacing(5)
+                                                                    }
+                                                                    else {
+                                                                        row![
+                                                                            button("Select").on_press(Message::OpenFileDialog),
+                                                                            button("Scan").on_press(Message::Scan)
+                                                                        ].spacing(5)
+                                                                    }
                                                                 ].spacing(5).width(Length::FillPortion(4)),
-                                                                button(Text::new("Clear").align_x(Center).width(Length::Fill)).on_press(Message::ClearImageFiles).width(Length::Fill)
+                                                                if self.scanning {
+                                                                    button(Text::new("Clear").align_x(Center).width(Length::Fill)).width(Length::Fill)
+                                                                }
+                                                                else {
+                                                                    button(Text::new("Clear").align_x(Center).width(Length::Fill)).on_press(Message::ClearImageFiles).width(Length::Fill)
+                                                                }
                                                             ].spacing(5)).padding(5).style(container::bordered_box).width(Length::FillPortion(1)),
                                                             rule::vertical(2),
                                                             Container::new(
                                                                 column![
                                                                     if self.current_file_handles.is_none() || self.current_file_handles.as_ref().unwrap().len() == 0 {
-                                                                        Viewer::new(Handle::from_bytes(ERROR_FERRIS)).width(Length::Fill).height(Length::Fill)
+                                                                        Container::new(Space::new().width(Length::Fill).height(Length::Fill))
                                                                     }
                                                                     else {
-                                                                        Viewer::new(self.current_file_handles.as_ref().unwrap()[self.current_page_index].clone()).width(Length::Fill).height(Length::Fill)
+                                                                        Container::new(Viewer::new(self.current_file_handles.as_ref().unwrap()[self.current_page_index].clone()).width(Length::Fill).height(Length::Fill))
                                                                     },
                                                                     rule::horizontal(2),
                                                                     row![
@@ -875,7 +900,6 @@ pub(crate) mod document_list {
                                                 else {
                                                     row![button("Delete").on_press(Message::ShowConfirmDelete)]
                                                 }
-                                                
                                             ].spacing(5)).width(Length::Fill).padding(5).style(container::bordered_box),
                                             Container::new(column![
                                                 row![
@@ -908,24 +932,42 @@ pub(crate) mod document_list {
                                                                 else {
                                                                     text_input("", &self.current_file_handles.as_ref().unwrap().len().to_string().as_str())
                                                                 },
-                                                                button("Select").on_press(Message::OpenFileDialog),
-                                                                button("Scan").on_press(Message::Scan),
+                                                                if self.scanning {
+                                                                    row![
+                                                                        button("Select"),
+                                                                        button(Spinner::new())
+                                                                    ].spacing(5)
+                                                                }
+                                                                else {
+                                                                    row![
+                                                                        button("Select").on_press(Message::OpenFileDialog),
+                                                                        button("Scan").on_press(Message::Scan),
+                                                                    ].spacing(5)
+                                                                }
                                                             ].spacing(5).width(Length::Fill),
-                                                            row![
-                                                                button(Text::new("Export").center()).on_press(Message::ExportToPdf).width(Length::FillPortion(1)),
-                                                                button(Text::new("Clear").center()).on_press(Message::ClearImageFiles).width(Length::FillPortion(1))
-                                                            ].spacing(5)
+                                                            if self.scanning {
+                                                                row![
+                                                                    button(Text::new("Export").center()).width(Length::FillPortion(1)),
+                                                                    button(Text::new("Clear").center()).width(Length::FillPortion(1))
+                                                                ].spacing(5)
+                                                            }
+                                                            else {
+                                                                row![
+                                                                    button(Text::new("Export").center()).on_press(Message::ExportToPdf).width(Length::FillPortion(1)),
+                                                                    button(Text::new("Clear").center()).on_press(Message::ClearImageFiles).width(Length::FillPortion(1))
+                                                                ].spacing(5)
+                                                            }
                                                         ].spacing(5),
-                                                        ProgressBar::new(0.0..=1.0, self.scan_progress)
+                                                        //ProgressBar::new(0.0..=1.0, self.scan_progress)
                                                     ].spacing(5)).padding(5).style(container::bordered_box).width(Length::FillPortion(1)).height(Length::Fill),
                                                     rule::vertical(2),
                                                     Container::new(
                                                         column![
                                                             if self.current_file_handles.is_none() || self.current_file_handles.as_ref().unwrap().len() == 0 {
-                                                                Viewer::new(Handle::from_bytes(ERROR_FERRIS)).width(Length::Fill).height(Length::Fill)
+                                                                Container::new(Space::new().width(Length::Fill).height(Length::Fill))
                                                             }
                                                             else {
-                                                                Viewer::new(self.current_file_handles.as_ref().unwrap()[self.current_page_index].clone()).width(Length::Fill).height(Length::Fill)
+                                                                Container::new(Viewer::new(self.current_file_handles.as_ref().unwrap()[self.current_page_index].clone()).width(Length::Fill).height(Length::Fill))
                                                             },
                                                             rule::horizontal(2),
                                                             row![
@@ -1023,7 +1065,6 @@ pub(crate) mod document_list {
             self.current_open_attachment = None;
             self.current_attachment_reference_number.clear();
             self.current_attachment_comment.clear();
-            self.current_file = None;
             self.current_file_bytes = None;
             self.current_file_path = None;
             self.data_changed = false;
@@ -1167,14 +1208,14 @@ pub(crate) mod document_list {
             let raw_bytes = match image::load_from_memory(&bytes) {
                 Ok(bytes) => {
                     let mut converted_bytes: Vec<u8> = Vec::new();
-                    bytes.write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png).expect("Error converting image");
+                    bytes.resize(2480, 3508, image::imageops::FilterType::Lanczos3).write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png).expect("Error converting image");
 
                     let mut parameters = CSParameters::new();
                     parameters.png.quality = 10;
                     parameters.png.optimization_level = 6;
                     let compressed_bytes = compress_in_memory(converted_bytes, &parameters).expect("Error compressing images for PDF");
-                    width = (bytes.width() / 300 * 72) as f32;
-                    height = (bytes.height() / 300 * 72) as f32;
+                    width = (2480 / 300 * 72) as f32;
+                    height = (3508 / 300 * 72) as f32;
 
                     Some(image::load_from_memory(&compressed_bytes).expect("Error loading compressed image from memory"))
                 },

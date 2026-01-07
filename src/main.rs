@@ -38,7 +38,7 @@ const HOME_IMAGE: &[u8] = include_bytes!("../home.jpg");
 pub fn main() -> iced::Result {
     let logfile = FileAppender::builder()
         .encoder(Box::new(PatternEncoder::new("{d} [{l}] {m}\n")))
-        .build("doc_manager.log")
+        .build("log.log")
         .unwrap();
 
     let log_config = log4rs::Config::builder()
@@ -50,8 +50,9 @@ pub fn main() -> iced::Result {
 
     log4rs::init_config(log_config).unwrap();
 
+
     iced::application(State::new, State::update, State::view)
-    .title("Doc Manager")
+    .title(State::window_title)
     .theme(State::current_theme)
     .subscription(State::subscription)
     .run()
@@ -393,6 +394,10 @@ impl State {
 
     fn current_theme(&self) -> Theme {
         self.config.current_theme().into()
+    }
+
+    fn window_title(&self) -> String {
+        format!("DocManager {}", env!("CARGO_PKG_VERSION"))
     }
 }
 
