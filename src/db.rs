@@ -4,6 +4,7 @@ pub(crate) mod db_module {
     use std::path::PathBuf;
     use std::sync::Arc;
 
+    use log::error;
     use rusqlite::Connection;
     use rusqlite::Result;
     use rusqlite::config::DbConfig;
@@ -22,16 +23,15 @@ pub(crate) mod db_module {
     impl DbConnection {
         pub(crate) fn new() -> DbConnection {
             DbConnection { 
-                conn: Result::expect(Self::db_init(), "Error connecting to database."),
+                conn: Self::db_init(),
                 last_rowid: None,
             }
         }
 
-        pub(crate) fn db_init() -> Result<Connection, rusqlite::Error> {
+        pub(crate) fn db_init() -> Connection {
             if !Path::new("./data.db").exists() {
-                let conn = Connection::open("./data.db")?;
-                conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_FKEY, true);
-                conn.execute(
+                let conn = Self::connect();
+                match conn.execute(
                 "CREATE TABLE document (
                         document_id INTEGER PRIMARY KEY,
                         document_number TEXT NOT NULL UNIQUE,
@@ -39,9 +39,15 @@ pub(crate) mod db_module {
                         comment TEXT,
                         date_added INTEGER NOT NULL DEFAULT (unixepoch('now'))
                     )", ()
-                )?;
+                ) {
+                    Err(err) => {
+                        error!("Error creating document table: {}", err);
+                        panic!("Error creating document table: {}", err);
+                    },
+                    _ => {}
+                };
 
-                conn.execute("CREATE TABLE attachment (
+                match conn.execute("CREATE TABLE attachment (
                         attachment_id INTEGER PRIMARY KEY,
                         reference_number TEXT NOT NULL UNIQUE,
                         comment TEXT,
@@ -49,22 +55,38 @@ pub(crate) mod db_module {
                         document_id INTEGER NOT NULL,
                         FOREIGN KEY(document_id) REFERENCES document(document_id) ON DELETE CASCADE
                     )", ()
-                )?;
+                ) {
+                    Err(err) => {
+                        error!("Error creating attachment table: {}", err);
+                        panic!("Error creating attachment table: {}", err);
+                    },
+                    _ => {}
+                };
 
-                conn.execute("CREATE TABLE page (
+                match conn.execute("CREATE TABLE page (
                         page_id INTEGER PRIMARY KEY,
                         file_path TEXT NOT NULL,
                         attachment_id INTEGER NOT NULL,
                         FOREIGN KEY(attachment_id) REFERENCES attachment(attachment_id) ON DELETE CASCADE
                 )", ()
-                )?;
+                ) {
+                    Err(err) => {
+                        error!("Error creating page table: {}", err);
+                        panic!("Error creating page table: {}", err);
+                    },
+                    _ => {}
+                };
 
-                    fs::create_dir("data").unwrap_or_else(|err| {
-                        println!("Error creating data folder: {}", err);
-                    });
-                    println!("DB initialized.");
+                match fs::create_dir("data") {
+                    Err(err) => {
+                        error!("Error creating data directory: {}", err);
+                        panic!("Error creating data directory: {}", err);
+                    },
+                    _ => {}
+                }
+                println!("DB initialized.");
 
-                return Ok(conn);
+                return conn;
                 
             }
             else {
@@ -75,8 +97,22 @@ pub(crate) mod db_module {
             
         }
 
-        fn connect() -> Result<Connection, rusqlite::Error> {
-            return Connection::open("./data.db");
+        fn connect() -> Connection {
+            let conn = match Connection::open("./data.db") {
+                Ok(conn) => conn,
+                Err(err) => {
+                    error!("Error connecting to database: {}", err);
+                    panic!("Error connecting to database: {}", err);
+                }
+            };
+            match conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_FKEY, true) {
+                Err(err) => {
+                    error!("Error enabling foreign keys during database connection: {}", err);
+                    panic!("Error enabling foreign keys during database connection: {}", err);
+                },
+                _ => {}
+            };
+            return conn
         }
 
         pub(crate) fn read_document_table(&self) -> Result<Vec<Arc<Document>>, rusqlite::Error> {
@@ -86,7 +122,13 @@ pub(crate) mod db_module {
                     row.get(0)?,
                     Arc::new(row.get(1)?),
                     Arc::new(row.get(2)?),
-                    Some(Result::expect(self.read_attachment_table(row.get(0)?), "Error reading attachment table.")),
+                    Some(match self.read_attachment_table(row.get(0)?) {
+                        Ok(attachments) => attachments,
+                        Err(err) => {
+                            error!("Error reading attachment table: {}", err);
+                            panic!("Error reading attachment table: {}", err);
+                        }
+                    }),
                     Arc::new(row.get(3)?),
                     row.get(4)?,
                 ))
@@ -105,7 +147,13 @@ pub(crate) mod db_module {
             let attachment_data = stmt.query_map([document_id], |row| {
                 Ok(Attachment::new(
                     row.get(0)?,
-                    Result::expect(self.read_pages_table(row.get(0)?), "Error reading pages table."),
+                    match self.read_pages_table(row.get(0)?) {
+                        Ok(pages) => pages,
+                        Err(err) => {
+                            error!("Error reading pages table: {}", err);
+                            panic!("Error reading pages table: {}", err);
+                        }
+                    },
                     Arc::new(row.get(1)?),
                     Arc::new(row.get(2)?),
                     row.get(3)?,
@@ -164,7 +212,13 @@ pub(crate) mod db_module {
         }
 
         pub(crate) fn edit_attachment_pages(&mut self, attachment_id: u32, file_paths: Vec<PathBuf>) -> Result<(), rusqlite::Error> {
-            let transaction = self.conn.transaction().expect("Error creating transaction");
+            let transaction = match self.conn.transaction() {
+                Ok(transaction) => transaction,
+                Err(err) => {
+                    error!("Error creating transaction: {}", err);
+                    panic!("Error creating transaction: {}", err);
+                }
+            };
             transaction.execute("DELETE FROM page WHERE attachment_id = ?1", (attachment_id,))?;
             for path in file_paths {
                 transaction.execute("INSERT INTO page (file_path, attachment_id) VALUES (?1, ?2)", (path.to_string_lossy(), attachment_id))?;
@@ -182,10 +236,6 @@ pub(crate) mod db_module {
 
         pub(crate) fn delete_attachment(&mut self, attachment_id: u32) -> Result<usize, rusqlite::Error> {
             return self.conn.execute("DELETE FROM attachment WHERE attachment_id = ?1", (attachment_id,))
-            // let transaction = self.conn.transaction().expect("Error creating transaction");
-            // transaction.execute("DELETE FROM page WHERE attachment_id = ?1", (attachment_id,))?;
-            // transaction.execute("DELETE FROM attachment WHERE attachment_id = ?1", (attachment_id,))?;
-            // transaction.commit()
         }
 
         pub(crate) fn last_rowid(&self) -> Option<i64> {

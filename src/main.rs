@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"]
 mod db;
 mod screen;
 mod document;
@@ -7,7 +7,7 @@ mod attachment_page;
 
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use hide_console_ng::hide_console;
 use iced::alignment::Horizontal::Left;
@@ -15,10 +15,12 @@ use iced::{Border, Color, Element, Length, Subscription, Task, Theme};
 use iced::widget::{Button, Column, Container, Text, button, column, container, row, rule};
 use iced_anim::animated::Mode;
 use iced_anim::{Animated, Animation, AnimationBuilder, Easing};
+use iced_aw::core::offset;
+use iced_aw::drop_down::Offset;
 use iced_aw::sidebar::TabLabel;
 use iced_aw::style::{card, sidebar};
 use iced_aw::widget::Sidebar;
-use log::LevelFilter;
+use log::{LevelFilter, error};
 use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Root};
 use log4rs::encode::pattern::PatternEncoder;
@@ -26,6 +28,8 @@ use screen::main_menu::main_menu;
 use screen::document_list::document_list;
 use screen::settings::settings;
 use serde::{Deserialize, Serialize};
+use time::macros::format_description;
+use time::{OffsetDateTime, UtcDateTime, format_description};
 
 use crate::screen::{MainMenu};
 use crate::screen::DocumentList;
@@ -36,26 +40,33 @@ const HOME_IMAGE: &[u8] = include_bytes!("../home.jpg");
 
 
 pub fn main() -> iced::Result {
-    let logfile = FileAppender::builder()
-        .encoder(Box::new(PatternEncoder::new("{d} [{l}] {m}\n")))
-        .build("log.log")
-        .unwrap();
-
-    let log_config = log4rs::Config::builder()
-        .appender(Appender::builder().build("logfile", Box::new(logfile)))
-        .build(Root::builder()
-            .appender("logfile")
-            .build(LevelFilter::Error))
-        .unwrap();
-
-    log4rs::init_config(log_config).unwrap();
-
+    init_logger();
 
     iced::application(State::new, State::update, State::view)
     .title(State::window_title)
     .theme(State::current_theme)
     .subscription(State::subscription)
     .run()
+}
+
+fn init_logger() {
+    let datetime = OffsetDateTime::from(SystemTime::now());
+    let date_format = format_description!("[year]-[month]-[day] [hour]-[minute]");
+    let offset_date = datetime.to_offset(OffsetDateTime::now_local().expect("Error applying date offset").offset()).format(date_format).unwrap();
+    println!("{}", offset_date);
+    let logfile = FileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new("{d} [{l}] {m}\n")))
+        .build(format!("./logs/{}.log", offset_date))
+        .unwrap();
+
+    let log_config = log4rs::Config::builder()
+        .appender(Appender::builder().build("logfile", Box::new(logfile)))
+        .build(Root::builder()
+            .appender("logfile")
+            .build(LevelFilter::Warn))
+        .unwrap();
+
+    log4rs::init_config(log_config).unwrap();
 }
 
 
@@ -171,13 +182,13 @@ struct Config {
 impl Config {
     fn new() -> Config {
         let toml = fs::read_to_string("./config.toml").unwrap_or_else(|err| {
-            println!("Error reading config file: {}", err);
+            error!("Error reading config file: {}", err);
             String::new()
         });
         match toml::from_str::<Config>(&toml) {
             Ok(config) => config,
             Err(err) => {
-                println!("Error deserializing config file: {}", err);
+                error!("Error deserializing config file: {}", err);
                 Config::default()
             },
         }

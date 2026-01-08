@@ -5,9 +5,10 @@ pub(crate) mod document_list {
     use file_format::FileFormat;
     use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
     use iced::widget::text_input;
-    use iced_aw::{Card, Spinner, TabBarPosition, TabLabel, Tabs, card::Status, style::card};
+    use iced_aw::{Card, Spinner, TabBarPosition, TabLabel, Tabs, card::Status, drop_down::Offset, style::card};
     use iced_dialog::dialog;
     use image::{DynamicImage, ImageBuffer};
+    use log::error;
     use pdfium_render::prelude::{PdfBitmap, PdfBitmapFormat, PdfPageImageObject, PdfPageObjectsCommon, PdfPageOrientation, PdfPagePaperSize, PdfPageRenderRotation, PdfPoints, PdfRenderConfig, Pdfium, PdfiumError, PdfiumLibraryBindings};
     use rfd::FileDialog;
     use rusqlite::ffi::SQLITE_LIMIT_FUNCTION_ARG;
@@ -43,6 +44,7 @@ pub(crate) mod document_list {
         input2_id: Option<Id>,
         input3_id: Option<Id>,
         scanning: bool,
+        exporting: bool,
         scan_progress: f32,
         current_theme: Option<LocalTheme>,
         show_confirm_delete: bool,
@@ -52,7 +54,7 @@ pub(crate) mod document_list {
     impl DocumentList {
         pub(crate) fn new() -> DocumentList {
             DocumentList {
-                documents: Result::expect(DbConnection::new().read_document_table(), "Error retrieving data from database."),
+                documents: retreive_documents(),
                 search_text: String::from(""),
                 current_open_document: None,
                 current_document_tab: Tab::default(),
@@ -78,6 +80,7 @@ pub(crate) mod document_list {
                 input2_id: Some(Id::new("2")),
                 input3_id: Some(Id::new("3")),
                 scanning: false,
+                exporting: false,
                 scan_progress: f32::default(),
                 current_theme: None,
                 show_confirm_delete: false,
@@ -113,7 +116,7 @@ pub(crate) mod document_list {
                         });
 
                         self.reset_state();
-                        self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                        self.documents = retreive_documents();
                         self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == conn.last_rowid().unwrap() as u32).cloned();
                         self.current_document_number = self.current_open_document.as_ref().unwrap().get_document_number().to_string();
                         self.current_document_type = self.current_open_document.as_ref().unwrap().get_document_type().to_string();
@@ -152,7 +155,7 @@ pub(crate) mod document_list {
                         });
 
                         self.reset_state();
-                        self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                        self.documents = retreive_documents();
                         self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
                     }
                     
@@ -276,7 +279,7 @@ pub(crate) mod document_list {
                         }
 
                         self.reset_attachment_state();
-                        self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                        self.documents = retreive_documents();
                         self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
                         self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == conn.last_rowid().unwrap() as u32).cloned();
                         self.current_attachment_reference_number = self.current_open_attachment.as_ref().unwrap().get_reference_number().to_string();
@@ -330,10 +333,22 @@ pub(crate) mod document_list {
 
                         if self.files_changed {
                             let path = format!("./data/{}/{}", current_document_number, self.current_open_attachment.as_ref().unwrap().get_reference_number());
-                            fs::remove_dir_all(&path).expect("Error deleting old directory");
+                            match fs::remove_dir_all(&path) {
+                                Err(err) => {
+                                    error!("Error deleting old directory: {}", err);
+                                    panic!("Error deleting old directory: {}", err);
+                                },
+                                _ => {}
+                            }
                             let mut file_paths: Vec<PathBuf> = Vec::new();
                             let file_dir = format!("./data/{}/{}", current_document_number, self.current_attachment_reference_number);
-                            fs::create_dir(&file_dir).expect("Error creating new directory");
+                            match fs::create_dir(&file_dir) {
+                                Err(err) => {
+                                    error!("Error creating new directory: {}", err);
+                                    panic!("Error creating new directory: {}", err);
+                                },
+                                _ => {}
+                            }
 
                             for (index, bytes) in self.current_file_bytes.as_mut().unwrap().iter_mut().enumerate() {
                                 let file_name = format!("{}_{}_{}.png", current_document_number, self.current_attachment_reference_number, index + 1);
@@ -356,7 +371,13 @@ pub(crate) mod document_list {
                                 file_paths.push(file_path.into());
                             }
 
-                            conn.edit_attachment_pages(self.current_open_attachment.as_ref().unwrap().get_attachment_id(), file_paths).expect("Error editing attachment pages");
+                            match conn.edit_attachment_pages(self.current_open_attachment.as_ref().unwrap().get_attachment_id(), file_paths) {
+                                Err(err) => {
+                                    error!("Error editing attachment pages: {}", err);
+                                    panic!("Error editing attachment pages: {}", err);
+                                },
+                                _ => {}
+                            }
 
                         }
                         else {
@@ -368,17 +389,35 @@ pub(crate) mod document_list {
                                 let file_name = format!("{}_{}_{}.png", current_document_number, self.current_attachment_reference_number, index + 1);
                                 let old_file_path = format!("{}/{}", old_file_dir, file_name);
 
-                                fs::rename(path, &old_file_path).expect("Error renaming file");
+                                match fs::rename(path, &old_file_path) {
+                                    Err(err) => {
+                                        error!("Error renaming file: {}", err);
+                                        panic!("Error renaming file: {}", err);
+                                    },
+                                    _ => {}
+                                }
                                 let new_file_path = format!("{}/{}", new_file_dir, file_name);
                                 new_file_paths.push(new_file_path.into());
                             }
-                            fs::rename(old_file_dir, &new_file_dir).expect("Error renaming directory");
+                            match fs::rename(old_file_dir, &new_file_dir) {
+                                Err(err) => {
+                                    error!("Error renaming directory: {}", err);
+                                    panic!("Error renaming directory: {}", err);
+                                },
+                                _ => {}
+                            }
 
-                            conn.edit_attachment_pages(self.current_open_attachment.as_ref().unwrap().get_attachment_id(), new_file_paths).expect("Error editing attachment pages");
+                            match conn.edit_attachment_pages(self.current_open_attachment.as_ref().unwrap().get_attachment_id(), new_file_paths) {
+                                Err(err) => {
+                                    error!("Error editing attachment pages: {}", err);
+                                    panic!("Error editing attachment pages: {}", err);
+                                },
+                                _ => {}
+                            }
                         }
 
                         self.reset_attachment_state();
-                        self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                        self.documents = retreive_documents();
                         self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
                         self.current_open_attachment = self.current_open_document.as_ref().unwrap().get_attachments().unwrap().iter().find(|attachment| attachment.get_attachment_id() == current_attachment_id).cloned();
                         self.current_attachment_reference_number = self.current_open_attachment.as_ref().unwrap().get_reference_number().to_string();
@@ -540,13 +579,19 @@ pub(crate) mod document_list {
                 }
                 Message::DeleteDocument => {
                     let mut conn = DbConnection::new();
-                    conn.delete_document(self.current_open_document.as_ref().unwrap().get_document_id());
+                    match conn.delete_document(self.current_open_document.as_ref().unwrap().get_document_id()) {
+                        Err(err) => {
+                            error!("Error deleting document: {}", err);
+                            panic!("Error deleting document: {}", err);
+                        },
+                        _ => {}
+                    }
                     match fs::remove_dir_all(format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_number())) {
                         Err(err) => println!("Error deleting data directory: {}", err),
                         Ok(_) => {}
                     }
 
-                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                    self.documents = retreive_documents();
                     self.reset_state();
                     
                     Task::none()
@@ -563,7 +608,7 @@ pub(crate) mod document_list {
                     }
 
                     let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
-                    self.documents = Result::expect(conn.read_document_table(), "Error retrieving data from database");
+                    self.documents = retreive_documents();
                     self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
                     self.reset_attachment_state();
                     
@@ -574,9 +619,33 @@ pub(crate) mod document_list {
                     Task::none()
                 },
                 Message::ExportToPdf => {
-                    let file_name = format!("{}_{}.pdf", self.current_open_document.as_ref().unwrap().get_document_number(), self.current_open_attachment.as_ref().unwrap().get_reference_number());
-                    let path = format!("./data/{}/{}/{}", self.current_open_document.as_ref().unwrap().get_document_number(), self.current_open_attachment.as_ref().unwrap().get_reference_number(), file_name);
-                    export_to_pdf(self.current_file_bytes.as_ref().unwrap().to_vec(), path.into());
+                    self.exporting = true;
+                    let current_open_document = self.current_open_document.as_ref().unwrap().clone();
+                    let current_open_attachment = self.current_open_attachment.as_ref().unwrap().clone();
+                    let current_file_bytes = self.current_file_bytes.as_ref().unwrap().clone();
+                    Task::future(
+                        async move {
+                            let file_name = format!("{}_{}.pdf", current_open_document.get_document_number(), current_open_attachment.get_reference_number());
+                            let path = format!("./data/{}/{}/{}", current_open_document.get_document_number(), current_open_attachment.get_reference_number(), file_name);
+                            match export_to_pdf(current_file_bytes, path.clone().into()) {
+                                Ok(_) => {
+                                    Message::ExportSuccess(path.clone().into())
+                                },
+                                Err(err) => {
+                                    println!("Error creating PDF file: {}", err);
+                                    Message::ExportFail
+                                }
+                            }
+                        }
+                    )
+                },
+                Message::ExportSuccess(path) => {
+                    self.exporting = false;
+                    reveal_file(&path);
+                    Task::none()
+                },
+                Message::ExportFail => {
+                    self.exporting = false;
                     Task::none()
                 },
                 Message::PrevPage => {
@@ -938,6 +1007,12 @@ pub(crate) mod document_list {
                                                                         button(Spinner::new())
                                                                     ].spacing(5)
                                                                 }
+                                                                else if self.exporting {
+                                                                    row![
+                                                                        button("Select"),
+                                                                        button("Scan")
+                                                                    ].spacing(5)
+                                                                }
                                                                 else {
                                                                     row![
                                                                         button("Select").on_press(Message::OpenFileDialog),
@@ -948,6 +1023,12 @@ pub(crate) mod document_list {
                                                             if self.scanning {
                                                                 row![
                                                                     button(Text::new("Export").center()).width(Length::FillPortion(1)),
+                                                                    button(Text::new("Clear").center()).width(Length::FillPortion(1))
+                                                                ].spacing(5)
+                                                            }
+                                                            else if self.exporting {
+                                                                row![
+                                                                    button(Spinner::new()).width(Length::FillPortion(1)),
                                                                     button(Text::new("Clear").center()).width(Length::FillPortion(1))
                                                                 ].spacing(5)
                                                             }
@@ -1078,6 +1159,18 @@ pub(crate) mod document_list {
             self.current_page_index = 0;
             self.current_file_handles = None;
         }
+
+        
+    }
+
+    fn retreive_documents() -> Vec<Arc<Document>> {
+        match DbConnection::new().read_document_table() {
+            Ok(documents) => documents,
+            Err(err) => {
+                error!("Error retreiving documents: {}", err);
+                panic!("Error retreiving documents: {}", err);
+            }
+        }
     }
 
     struct DataCard {
@@ -1097,12 +1190,25 @@ pub(crate) mod document_list {
 
         fn new_document_card(&self) -> MouseArea<'static, Message> {
             let datetime_format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
-            let datetime = Result::expect (
-                Result::expect (
-                    UtcDateTime::from_unix_timestamp(self.document.as_ref().unwrap().get_date_added()),
-                    "Error retrieving data from Document.").to_offset(OffsetDateTime::now_local().expect("Failed to acquire local offset.").offset())
-            .format(datetime_format),
-            "Error converting unix epoch to UtcDateTime");
+            let datetime = match match UtcDateTime::from_unix_timestamp(self.document.as_ref().unwrap().get_date_added()) {
+                Ok(datetime) => datetime,
+                Err(err) => {
+                    error!("Error converting Unix Timestamp to UtcDateTime: {}", err);
+                    panic!("Error converting Unix Timestamp to UtcDateTime: {}", err);
+                }
+            }.to_offset(match OffsetDateTime::now_local() {
+                Ok(offset_date) => offset_date.offset(),
+                Err(err) => {
+                    error!("Error applying offset: {}", err);
+                    panic!("Error applying offset: {}", err);
+                }
+            }).format(datetime_format) {
+                Ok(date_string) => date_string,
+                Err(err) => {
+                    error!("Error formatting datetime: {}", err);
+                    panic!("Error formatting datetime: {}", err);
+                }
+            };
 
             mouse_area(
                 Card::new(Text::new(self.document.as_ref().unwrap().get_document_number().to_string()), column![
@@ -1114,12 +1220,25 @@ pub(crate) mod document_list {
 
         fn new_attachment_card(&self) -> MouseArea<'static, Message> {
             let datetime_format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
-            let datetime = Result::expect (
-                Result::expect (
-                    UtcDateTime::from_unix_timestamp(self.attachment.as_ref().unwrap().get_date_added()),
-                    "Error retrieving data from Attachment.").to_offset(OffsetDateTime::now_local().expect("Failed to acquire local offset.").offset())
-            .format(datetime_format),
-            "Error converting unix epoch to UtcDateTime");
+            let datetime = match match UtcDateTime::from_unix_timestamp(self.attachment.as_ref().unwrap().get_date_added()) {
+                Ok(datetime) => datetime,
+                Err(err) => {
+                    error!("Error converting Unix timestamp to UtcDateTime: {}", err);
+                    panic!("Error converting Unix timestamp to UtcDateTime: {}", err);
+                }
+            }.to_offset(match OffsetDateTime::now_local() {
+                Ok(offset_date) => offset_date.offset(),
+                Err(err) => {
+                    error!("Error applying offset: {}", err);
+                    panic!("Error applying offset: {}", err);
+                }
+            }).format(datetime_format) {
+                Ok(date_string) => date_string,
+                Err(err) => {
+                    error!("Error formatting datetime: {}", err);
+                    panic!("Error formatting datetime: {}", err);
+                }
+            };
 
             mouse_area(
                 Card::new(Text::new(self.attachment.as_ref().unwrap().get_reference_number().to_string()), column![
@@ -1179,18 +1298,28 @@ pub(crate) mod document_list {
 
     fn pdf_to_png(bytes: Vec<u8>) -> Vec<Vec<u8>> {
         let pdfium = Pdfium::default();
-        let document = pdfium.load_pdf_from_byte_vec(bytes, None);
+        let document = match pdfium.load_pdf_from_byte_vec(bytes, None) {
+            Ok(document) => document,
+            Err(err) => {
+                error!("Error loading PDF document: {}", err);
+                pdfium.create_new_pdf().unwrap()
+            }
+        };
         let config = PdfRenderConfig::new()
             .rotate_if_landscape(PdfPageRenderRotation::None, true)
             .set_fixed_size(2480, 3508);
         let mut bitmaps: Vec<Vec<u8>> = Vec::new();
 
-        for page in Result::expect(document, "Error unwrapping PDF Document").pages().iter() {
+        for page in document.pages().iter() {
             let mut bytes: Vec<u8> = Vec::new();
-            page.render_with_config(&config).unwrap()
+            match page.render_with_config(&config).unwrap()
                 .as_image()
-                .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Bmp)
-                .expect("Error converting PDF to image bytes");
+                .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Bmp) {
+                    Err(err) => {
+                        error!("Error creating PDF page from image bytes: {}", err);
+                    }
+                    _ => {}
+                }
 
             bitmaps.push(bytes);
         }
@@ -1198,9 +1327,15 @@ pub(crate) mod document_list {
         return bitmaps
     }
 
-    fn export_to_pdf(byte_vec: Vec<Vec<u8>>, path: PathBuf) {
+    fn export_to_pdf(byte_vec: Vec<Vec<u8>>, path: PathBuf) -> Result<(), PdfiumError> {
         let pdfium = Pdfium::default();
-        let mut document = Result::expect(pdfium.create_new_pdf(), "Error creating new document");
+        let mut document = match pdfium.create_new_pdf() {
+            Ok(document) => document,
+            Err(err) => {
+                error!("Error creating new PDF document: {}", err);
+                panic!("Error creating new PDF document: {}", err);
+            }
+        };
         
         for bytes in byte_vec {
             let mut width: f32 = 0.0;
@@ -1208,33 +1343,72 @@ pub(crate) mod document_list {
             let raw_bytes = match image::load_from_memory(&bytes) {
                 Ok(bytes) => {
                     let mut converted_bytes: Vec<u8> = Vec::new();
-                    bytes.resize(2480, 3508, image::imageops::FilterType::Lanczos3).write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png).expect("Error converting image");
+                    match bytes.resize(2480, 3508, image::imageops::FilterType::Lanczos3).write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
+                        Err(err) => {
+                            error!("Error converting image: {}", err);
+                        }
+                        _ => {}
+                    }
 
                     let mut parameters = CSParameters::new();
                     parameters.png.quality = 10;
                     parameters.png.optimization_level = 6;
-                    let compressed_bytes = compress_in_memory(converted_bytes, &parameters).expect("Error compressing images for PDF");
+                    let compressed_bytes = match compress_in_memory(converted_bytes, &parameters) {
+                        Ok(bytes) => bytes,
+                        Err(err) => {
+                            error!("Error compressing image: {}", err);
+                            panic!("Error compressing image: {}", err);
+                        }
+                    };
                     width = (2480 / 300 * 72) as f32;
                     height = (3508 / 300 * 72) as f32;
 
-                    Some(image::load_from_memory(&compressed_bytes).expect("Error loading compressed image from memory"))
+                    Some(match image::load_from_memory(&compressed_bytes) {
+                        Ok(image) => image,
+                        Err(err) => {
+                            error!("Error loading compressed bytes from memory: {}", err);
+                            panic!("Error loading compressed bytes from memory: {}", err);
+                        }
+                    })
                 },
                 Err(err) => {
-                    println!("Error loading image from memory: {}", err);
-                    None
+                    error!("Error loading image from memory: {}", err);
+                    panic!("Error loading image from memory: {}", err);
                 }
             };
 
-            let mut page = document.pages_mut().create_page_at_end(PdfPagePaperSize::a4()).expect("Error creating document page");
-            page.objects_mut().create_image_object((PdfPagePaperSize::a4().width() - PdfPoints::new(width)) / 2.0, (PdfPagePaperSize::a4().height() - PdfPoints::new(height)) / 2.0, raw_bytes.as_ref().unwrap(), Some(PdfPoints::new(width)), Some(PdfPoints::new(height))).expect("Error adding image to page");
+            let mut page = match document.pages_mut().create_page_at_end(PdfPagePaperSize::a4()) {
+                Ok(page) => page,
+                Err(err) => {
+                    error!("Error creating PDF page: {}", err);
+                    panic!("Error creating PDF page: {}", err);
+                }
+            };
+            match page.objects_mut().create_image_object((PdfPagePaperSize::a4().width() - PdfPoints::new(width)) / 2.0, (PdfPagePaperSize::a4().height() - PdfPoints::new(height)) / 2.0, raw_bytes.as_ref().unwrap(), Some(PdfPoints::new(width)), Some(PdfPoints::new(height))) {
+                Err(err) => {
+                    error!("Error adding image to PDF page: {}", err);
+                    panic!("Error adding image to PDF page: {}", err);
+                },
+                _ => {}
+            };
         }
 
-        document.save_to_file(&path).expect("Error saving to PDF");
-        reveal_file(&path);
+        match document.save_to_file(&path) {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                println!("Error saving PDF file: {}", err);
+                return Err(err)
+            }
+        }
     }
 
     fn reveal_file(path: &PathBuf) {
-        opener::reveal(path).expect("Error revealing file");
+        match opener::reveal(path) {
+            Err(err) => {
+                error!("Error revealing file: {}", err);
+            }
+            _ => {}
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -1269,6 +1443,8 @@ pub(crate) mod document_list {
         FinalizeScan,
         ClearImageFiles,
         ExportToPdf,
+        ExportSuccess(PathBuf),
+        ExportFail,
         PrevPage,
         NextPage,
         None,
