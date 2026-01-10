@@ -1,6 +1,8 @@
 pub(crate) mod attachment_page {
     use std::{fs, sync::Arc};
 
+    use log::error;
+
     #[derive(Debug, Clone)]
     pub(crate) struct AttachmentPage {
         page_id: u32,
@@ -16,7 +18,7 @@ pub(crate) mod attachment_page {
                 image: match fs::read(&file_path) {
                     Ok(image) => image,
                     Err(err) => {
-                        println!("Error reading image file: {}", err);
+                        error!("Error reading image file: {}", err);
                         Vec::new()
                     }
                 },

@@ -8,7 +8,7 @@ pub(crate) mod document_list {
     use iced_aw::{Card, Spinner, TabBarPosition, TabLabel, Tabs, card::Status, drop_down::Offset, style::card};
     use iced_dialog::dialog;
     use image::{DynamicImage, ImageBuffer};
-    use log::error;
+    use log::{error, info};
     use pdfium_render::prelude::{PdfBitmap, PdfBitmapFormat, PdfPageImageObject, PdfPageObjectsCommon, PdfPageOrientation, PdfPagePaperSize, PdfPageRenderRotation, PdfPoints, PdfRenderConfig, Pdfium, PdfiumError, PdfiumLibraryBindings};
     use rfd::FileDialog;
     use rusqlite::ffi::SQLITE_LIMIT_FUNCTION_ARG;
@@ -106,14 +106,16 @@ pub(crate) mod document_list {
                     else {
                         let mut conn = DbConnection::new();
                         self.current_document_number = self.current_document_number.trim().to_string();
-                        conn.new_document(
+                        match conn.new_document(
                             self.current_document_number.clone(),
                             self.current_document_type.clone(), 
                             self.current_comment.clone()
-                        ).unwrap_or_else(|err| {
-                            println!("Error adding new document: {}", err);
-                            0
-                        });
+                        ) {
+                            Err(err) => {
+                                error!("Error saving new Document: {}", err);
+                            },
+                            _ => {}
+                        }
 
                         self.reset_state();
                         self.documents = retreive_documents();
@@ -122,9 +124,12 @@ pub(crate) mod document_list {
                         self.current_document_type = self.current_open_document.as_ref().unwrap().get_document_type().to_string();
                         self.current_comment = self.current_open_document.as_ref().unwrap().get_comment().to_string();
                         let file_path = format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_number());
-                        fs::create_dir(file_path).unwrap_or_else(|err| {
-                            println!("Error creating document's attachment folder: {}", err);
-                        });
+                        match fs::create_dir(file_path) {
+                            Err(err) => {
+                                error!("Error creating Document's data directory: {}", err);
+                            },
+                            _ => {}
+                        }
                     }
                     
                     Task::none()
@@ -144,15 +149,17 @@ pub(crate) mod document_list {
                         let mut conn=  DbConnection::new();
                         let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
                         self.current_document_number = self.current_document_number.trim().to_string();
-                        conn.edit_document_details(
+                        match conn.edit_document_details(
                             current_document_id,
                             self.current_document_number.clone(),
                             self.current_document_type.clone(),
                             self.current_comment.clone()
-                        ).unwrap_or_else(|err| {
-                            println!("Error editing document: {}", err);
-                            0
-                        });
+                        ) {
+                            Err(err) => {
+                                error!("Error editing document: {}", err);
+                            },
+                            _ => {}
+                        }
 
                         self.reset_state();
                         self.documents = retreive_documents();
@@ -223,7 +230,7 @@ pub(crate) mod document_list {
                                     }
                                 }
                                 Err(err) => {
-                                    println!("Error reading files from paths: {}", err);
+                                    error!("Error reading files from paths: {}", err);
                                 }
                             }
                         }
@@ -244,9 +251,12 @@ pub(crate) mod document_list {
                     else {
                         self.current_attachment_reference_number = self.current_attachment_reference_number.trim().to_string();
                         let file_path = format!("./data/{}/{}", self.current_open_document.as_ref().unwrap().get_document_number(), self.current_attachment_reference_number);
-                        fs::create_dir(&file_path).unwrap_or_else(|err| {
-                            println!("Error creating document's attachment folder: {}", err);
-                        });
+                        match fs::create_dir(&file_path) {
+                            Err(err) => {
+                                error!("Error creating attachment's data folder: {}", err);
+                            }
+                            _ => {}
+                        }
                         let mut conn = DbConnection::new();
                         let current_document_id = self.current_open_document.clone().unwrap().get_document_id();
                         let current_document_number = &self.current_document_number;
@@ -256,9 +266,12 @@ pub(crate) mod document_list {
                             data_file_paths.push(format!("{}/{}_{}_{}.png", &file_path, current_document_number, self.current_attachment_reference_number, index + 1).into())
                         }
                         
-                        conn.new_attachment(data_file_paths, self.current_attachment_reference_number.clone(), self.current_attachment_comment.clone(), current_document_id).unwrap_or_else(|err| {
-                            println!("Error creating new attachment: {}", err);
-                        });
+                        match conn.new_attachment(data_file_paths, self.current_attachment_reference_number.clone(), self.current_attachment_comment.clone(), current_document_id) {
+                            Err(err) => {
+                                error!("Error creating new attachment: {}", err);
+                            },
+                            _ => {}
+                        };
 
                         for (index, bytes) in self.current_file_bytes.as_mut().unwrap().iter_mut().enumerate() {
                             let file_name = format!("{}_{}_{}.png", current_document_number, self.current_attachment_reference_number, index + 1);
@@ -266,16 +279,19 @@ pub(crate) mod document_list {
                             if FileFormat::from_bytes(&bytes) != FileFormat::PortableNetworkGraphics {
                                 let img = image::load_from_memory(&bytes);
                                 match img.unwrap().write_to(&mut Cursor::new(&mut *bytes), image::ImageFormat::Png) {
-                                    Err(err) => println!("Error converting image format: {}", err),
+                                    Err(err) => error!("Error converting image format: {}", err),
                                     _ => {}
                                 }
                             }
 
                             let compressed_bytes = compress_image(bytes.to_vec());
 
-                            fs::write(&file_path, compressed_bytes).unwrap_or_else(|err| {
-                                println!("Error writing file to data folder: {}", err);
-                            });
+                            match fs::write(&file_path, compressed_bytes) {
+                                Err(err) => {
+                                    error!("Error writing file to data folder: {}", err);
+                                },
+                                _ => {}
+                            };
                         }
 
                         self.reset_attachment_state();
@@ -322,14 +338,16 @@ pub(crate) mod document_list {
 
                         self.current_attachment_reference_number = self.current_attachment_reference_number.trim().to_string();
                         
-                        conn.edit_attachment_details(
+                        match conn.edit_attachment_details(
                             current_attachment_id,
                             self.current_attachment_reference_number.clone(),
                             self.current_attachment_comment.clone()
-                        ).unwrap_or_else(|err| {
-                            println!("Error editing attachment: {}", err);
-                            0
-                        });
+                        ) {
+                            Err(err) => {
+                                error!("Error editing attachment: {}", err);
+                            },
+                            _ => {}
+                        };
 
                         if self.files_changed {
                             let path = format!("./data/{}/{}", current_document_number, self.current_open_attachment.as_ref().unwrap().get_reference_number());
@@ -357,16 +375,19 @@ pub(crate) mod document_list {
                                 if FileFormat::from_bytes(&bytes) != FileFormat::PortableNetworkGraphics {
                                     let img = image::load_from_memory(&bytes);
                                     match img.unwrap().write_to(&mut Cursor::new(&mut *bytes), image::ImageFormat::Png) {
-                                        Err(err) => println!("Error converting image format: {}", err),
+                                        Err(err) => error!("Error converting image format: {}", err),
                                         _ => {}
                                     }
                                 }
 
                                 let compressed_bytes = compress_image(bytes.to_vec());
 
-                                fs::write(&file_path, compressed_bytes).unwrap_or_else(|err| {
-                                    println!("Error writing file to data folder: {}", err);
-                                });
+                                match fs::write(&file_path, compressed_bytes) {
+                                    Err(err) => {
+                                        error!("Error writing file to data folder: {}", err);
+                                    },
+                                    _ => {}
+                                };
 
                                 file_paths.push(file_path.into());
                             }
@@ -503,15 +524,15 @@ pub(crate) mod document_list {
 
                             match output {
                                 Ok(out) if out.status.success() => {
-                                    println!("Success");
+                                    info!("Success");
                                     String::from_utf8_lossy(&out.stdout).trim().to_string()
                                 }
                                 Ok(out) => {
-                                    eprintln!("Scan failed, stderr: {}", String::from_utf8_lossy(&out.stderr));
+                                    error!("Scan failed, stderr: {}", String::from_utf8_lossy(&out.stderr));
                                     String::new()
                                 }
                                 Err(err) => {
-                                    println!("Error running powershell command: {}", err);
+                                    error!("Error running powershell command: {}", err);
                                     String::new()
                                 }
                                 _ => String::new()
@@ -539,14 +560,14 @@ pub(crate) mod document_list {
                             let mut converted_bytes: Vec<u8> = Vec::new();
                             let scanned = image::load_from_memory(&bytes);
                             match scanned.unwrap().write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
-                                    Err(err) => println!("Error converting scanned image format: {}", err),
+                                    Err(err) => error!("Error converting scanned image format: {}", err),
                                     _ => {}
                                 }
                             self.add_file_bytes(converted_bytes);
                             self.update_file_handles();
                         },
                         Err(err) => {
-                            println!("Error reading scanned image: {}", err);
+                            error!("Error reading scanned image: {}", err);
                             self.current_file_path = None;
                         }
                     }
@@ -555,7 +576,7 @@ pub(crate) mod document_list {
                 Message::ScanFail => {
                     self.scanning = false;
                     self.scan_progress = 0.0;
-                    println!("Scan failed or was cancelled.");
+                    error!("Scan failed or was cancelled.");
                     Task::none()
                 },
                 Message::ScanTick => {
@@ -587,7 +608,7 @@ pub(crate) mod document_list {
                         _ => {}
                     }
                     match fs::remove_dir_all(format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_number())) {
-                        Err(err) => println!("Error deleting data directory: {}", err),
+                        Err(err) => error!("Error deleting data directory: {}", err),
                         Ok(_) => {}
                     }
 
@@ -600,10 +621,10 @@ pub(crate) mod document_list {
                     let mut conn = DbConnection::new();
                     match conn.delete_attachment(self.current_open_attachment.as_ref().unwrap().get_attachment_id()) {
                         Ok(_) => {},
-                        Err(err) => println!("Error deleting attachment: {}", err)
+                        Err(err) => error!("Error deleting attachment: {}", err)
                     }
                     match fs::remove_dir_all(format!("./data/{}/{}", self.current_open_document.as_ref().unwrap().get_document_number(), self.current_open_attachment.as_ref().unwrap().get_reference_number())) {
-                        Err(err) => println!("Error deleting file: {}", err),
+                        Err(err) => error!("Error deleting file: {}", err),
                         Ok(_) => {}
                     }
 
@@ -632,7 +653,7 @@ pub(crate) mod document_list {
                                     Message::ExportSuccess(path.clone().into())
                                 },
                                 Err(err) => {
-                                    println!("Error creating PDF file: {}", err);
+                                    error!("Error creating PDF file: {}", err);
                                     Message::ExportFail
                                 }
                             }
@@ -1288,10 +1309,13 @@ pub(crate) mod document_list {
         parameters.png.quality = 100;
         parameters.png.optimization_level = 6;
         
-        let compressed_bytes = compress_in_memory(bytes.to_vec(), &parameters).unwrap_or_else(|err| {
-            println!("Error compressing image: {}", err);
-            Vec::new()
-        });
+        let compressed_bytes = match compress_in_memory(bytes.to_vec(), &parameters) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                error!("Error compressing image: {}", err);
+                Vec::new()
+            }
+        };
 
         return compressed_bytes
     }
@@ -1396,7 +1420,7 @@ pub(crate) mod document_list {
         match document.save_to_file(&path) {
             Ok(_) => Ok(()),
             Err(err) => {
-                println!("Error saving PDF file: {}", err);
+                error!("Error saving PDF file: {}", err);
                 return Err(err)
             }
         }

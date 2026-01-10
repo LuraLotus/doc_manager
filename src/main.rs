@@ -53,7 +53,6 @@ fn init_logger() {
     let datetime = OffsetDateTime::from(SystemTime::now());
     let date_format = format_description!("[year]-[month]-[day] [hour]-[minute]");
     let offset_date = datetime.to_offset(OffsetDateTime::now_local().expect("Error applying date offset").offset()).format(date_format).unwrap();
-    println!("{}", offset_date);
     let logfile = FileAppender::builder()
         .encoder(Box::new(PatternEncoder::new("{d} [{l}] {m}\n")))
         .build(format!("./logs/{}.log", offset_date))
@@ -313,7 +312,6 @@ impl State {
                     document_list::Message::Back => {
                         if self.current_tab != self.previous_tab.unwrap() {
                             self.current_tab = self.previous_tab.unwrap_or_else(|| {
-                                println!("No previous tab");
                                 self.current_tab
                             });
                         }
@@ -332,32 +330,43 @@ impl State {
                 match settings_message {
                     settings::Message::ChangeTheme(theme) => {
                         self.config.change_theme(theme.clone());
-                        let serialized = toml::to_string(&self.config).unwrap_or_else(|err| {
-                            println!("Error serializing config to toml: {}", err);
-                            String::new()
-                        });
-                        fs::write("./config.toml", serialized).unwrap_or_else(|err| {
-                            println!("Error writing to config file: {}", err);
-                        });
+                        let serialized = match toml::to_string(&self.config) {
+                            Ok(string) => string,
+                            Err(err) => {
+                                error!("Error serializing config to toml: {}", err);
+                                String::new()
+                            }
+                        };
+                        match fs::write("./config.toml", serialized) {
+                            Err(err) => {
+                                error!("Error writing to config file: {}", err);
+                            },
+                            _ => {}
+                        };
                         self.settings.set_theme(theme.clone());
                         self.document_list.set_current_theme(theme.clone().into());
                     }
                     settings::Message::ShowConsole(show_console) => {
                         self.config.show_console = show_console;
                         self.config.show_console();
-                        let serialized = toml::to_string(&self.config).unwrap_or_else(|err| {
-                            println!("Error serializing config to toml: {}", err);
-                            String::new()
-                        });
-                        fs::write("./config.toml", serialized).unwrap_or_else(|err| {
-                            println!("Error writing to config file: {}", err);
-                        });
+                        let serialized = match toml::to_string(&self.config) {
+                            Ok(string) => string,
+                            Err(err) => {
+                                error!("Error serializing config to toml: {}", err);
+                                String::new()
+                            }
+                        };
+                        match fs::write("./config.toml", serialized) {
+                            Err(err) => {
+                                error!("Error writing to config file: {}", err);
+                            },
+                            _ => {}
+                        };
                         return self.settings.update(settings_message).map(Message::Settings)
                     }
                     settings::Message::Back => {
                         if self.current_tab != self.previous_tab.unwrap() {
                             self.current_tab = self.previous_tab.unwrap_or_else(|| {
-                                println!("No previous tab");
                                 self.current_tab
                             });
                         } else {
