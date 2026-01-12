@@ -20,7 +20,7 @@ use iced_aw::drop_down::Offset;
 use iced_aw::sidebar::TabLabel;
 use iced_aw::style::{card, sidebar};
 use iced_aw::widget::Sidebar;
-use log::{LevelFilter, error};
+use log::{LevelFilter, error, warn};
 use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Root};
 use log4rs::encode::pattern::PatternEncoder;
@@ -181,13 +181,13 @@ struct Config {
 impl Config {
     fn new() -> Config {
         let toml = fs::read_to_string("./config.toml").unwrap_or_else(|err| {
-            error!("Error reading config file: {}", err);
+            warn!("Error reading config file: {}", err);
             String::new()
         });
         match toml::from_str::<Config>(&toml) {
             Ok(config) => config,
             Err(err) => {
-                error!("Error deserializing config file: {}", err);
+                warn!("Error deserializing config file: {}", err);
                 Config::default()
             },
         }
