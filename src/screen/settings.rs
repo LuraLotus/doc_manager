@@ -48,7 +48,7 @@ pub(crate) mod settings {
                     //     Text::new("Show Console: "),
                     //     Toggler::new(self.show_console).on_toggle(Message::ShowConsole).size(18)
                     // ].spacing(5).align_y(Center)
-                ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill),
+                ].spacing(5)).padding(10).style(container::bordered_box).width(Length::Fill).height(Length::Fill),
             ].spacing(5)).into()
         }
 

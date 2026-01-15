@@ -22,6 +22,11 @@ use iced_aw::style::{card, sidebar};
 use iced_aw::widget::Sidebar;
 use log::{LevelFilter, error, warn};
 use log4rs::append::file::FileAppender;
+use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
+use log4rs::append::rolling_file::{RollingFileAppender, policy};
+use log4rs::append::rolling_file::policy::Policy;
+use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
+use log4rs::append::rolling_file::policy::compound::roll::fixed_window::FixedWindowRoller;
 use log4rs::config::{Appender, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use screen::main_menu::main_menu;
@@ -51,11 +56,16 @@ pub fn main() -> iced::Result {
 
 fn init_logger() {
     let datetime = OffsetDateTime::from(SystemTime::now());
-    let date_format = format_description!("[year]-[month]-[day] [hour]-[minute]");
+    let date_format = format_description!("[year]-[month]-[day]");
     let offset_date = datetime.to_offset(OffsetDateTime::now_local().expect("Error applying date offset").offset()).format(date_format).unwrap();
-    let logfile = FileAppender::builder()
-        .encoder(Box::new(PatternEncoder::new("{d} [{l}] {m}\n")))
-        .build(format!("./logs/{}.log", offset_date))
+    let roller = FixedWindowRoller::builder()
+        .build(format!("./logs/{}_{{}}.log", offset_date).as_str(), 5)
+        .unwrap();
+    let trigger = SizeTrigger::new(10 * 1024 * 1024);
+    let policy = CompoundPolicy::new(Box::new(trigger), Box::new(roller));
+    let logfile = RollingFileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} [{l}] {m}\n")))
+        .build(format!("./logs/{}.log", offset_date), Box::new(policy))
         .unwrap();
 
     let log_config = log4rs::Config::builder()
@@ -79,8 +89,8 @@ enum Message {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Default, Copy)]
 pub(crate) enum Tab {
-    #[default]
     Home,
+    #[default]
     DocumentList,
     Settings
 }
@@ -172,7 +182,7 @@ impl Into<Theme> for LocalTheme {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Config {
     current_theme: LocalTheme,
     show_console: bool
@@ -181,13 +191,13 @@ struct Config {
 impl Config {
     fn new() -> Config {
         let toml = fs::read_to_string("./config.toml").unwrap_or_else(|err| {
-            warn!("Error reading config file: {}", err);
+            error!("Error reading config file: {}", err);
             String::new()
         });
         match toml::from_str::<Config>(&toml) {
             Ok(config) => config,
             Err(err) => {
-                warn!("Error deserializing config file: {}", err);
+                error!("Error deserializing config file: {}", err);
                 Config::default()
             },
         }
@@ -264,7 +274,7 @@ impl State {
                 _ => Theme::Dark
             }
         );
-        State {
+        let mut state = State {
             current_tab: Tab::default(),
             main_menu: MainMenu::new(),
             document_list: DocumentList::new(),
@@ -272,7 +282,9 @@ impl State {
             config,
             previous_tab: None,
             sidebar_button_color: Color::default()
-        }
+        };
+        state.document_list.set_current_theme(initial_theme);
+        return state
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -302,6 +314,15 @@ impl State {
             },
             Message::MainMenu(main_menu_message) => {
                 match main_menu_message {
+                    main_menu::Message::DocumentList => {
+                        self.previous_tab = Some(Tab::DocumentList);
+                        self.document_list.set_current_theme(self.config.current_theme().into());
+                        self.current_tab = Tab::DocumentList;
+                    },
+                    main_menu::Message::Settings => {
+                        self.previous_tab = Some(Tab::Settings);
+                        self.current_tab = Tab::Settings;
+                    }
                     _ => {
                         return self.main_menu.update(main_menu_message).map(Message::MainMenu)
                     }
@@ -310,15 +331,16 @@ impl State {
             Message::DocumentList(document_list_message) => {
                 match document_list_message {
                     document_list::Message::Back => {
-                        if self.current_tab != self.previous_tab.unwrap() {
-                            self.current_tab = self.previous_tab.unwrap_or_else(|| {
-                                self.current_tab
-                            });
+                        if self.previous_tab.is_some() {
+                            if self.current_tab != self.previous_tab.unwrap() && self.current_tab != Tab::DocumentList {
+                                self.current_tab = self.previous_tab.unwrap_or_else(|| {
+                                    self.current_tab
+                                });
+                            }
+                            else {
+                                self.current_tab = Tab::DocumentList;
+                            }
                         }
-                        else {
-                            self.current_tab = Tab::Home;
-                        }
-                        
                     }
                     _ => {
                         //let Screen::DocumentList(screen) = &mut self.current_screen else { return Task::none(); };
@@ -365,12 +387,15 @@ impl State {
                         return self.settings.update(settings_message).map(Message::Settings)
                     }
                     settings::Message::Back => {
-                        if self.current_tab != self.previous_tab.unwrap() {
-                            self.current_tab = self.previous_tab.unwrap_or_else(|| {
-                                self.current_tab
-                            });
-                        } else {
-                            self.current_tab = Tab::Home;
+                        if self.previous_tab.is_some() {
+                            if self.current_tab != self.previous_tab.unwrap() && self.current_tab != Tab::DocumentList {
+                                self.current_tab = self.previous_tab.unwrap_or_else(|| {
+                                    self.current_tab
+                                });
+                            }
+                            else {
+                                self.current_tab = Tab::DocumentList;
+                            }
                         }
                     }
                     _ => {
@@ -430,14 +455,14 @@ impl Default for State {
 fn sidebar(selected_tab: Tab) -> Element<'static, Message> {
     Container::new(
         column![
-            button(Text::from("Home").size(18)).on_press(Message::SelectedTab(Tab::Home)).width(Length::Fill).style(move |theme: &Theme, status| 
-                if selected_tab == Tab::Home {
-                    sidebar_button_selected_style(theme)
-                }
-                else {
-                    sidebar_button_style(theme, status)
-                }
-            ),
+            // button(Text::from("Home").size(18)).on_press(Message::SelectedTab(Tab::Home)).width(Length::Fill).style(move |theme: &Theme, status| 
+            //     if selected_tab == Tab::Home {
+            //         sidebar_button_selected_style(theme)
+            //     }
+            //     else {
+            //         sidebar_button_style(theme, status)
+            //     }
+            // ),
             button(Text::from("Document List").size(18)).on_press(Message::SelectedTab(Tab::DocumentList)).width(Length::Fill).style(move |theme: &Theme, status|
                 if selected_tab == Tab::DocumentList {
                     sidebar_button_selected_style(theme)

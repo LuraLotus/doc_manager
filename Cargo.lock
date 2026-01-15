@@ -3280,6 +3280,7 @@ dependencies = [
  "arc-swap",
  "chrono",
  "derive_more",
+ "flate2",
  "fnv",
  "humantime",
  "libc",

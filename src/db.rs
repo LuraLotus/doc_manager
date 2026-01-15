@@ -5,6 +5,7 @@ pub(crate) mod db_module {
     use std::sync::Arc;
 
     use log::error;
+    use log::info;
     use rusqlite::Connection;
     use rusqlite::Result;
     use rusqlite::config::DbConfig;
@@ -84,13 +85,13 @@ pub(crate) mod db_module {
                     },
                     _ => {}
                 }
-                println!("DB initialized.");
+                info!("DB initialized.");
 
                 return conn;
                 
             }
             else {
-                println!("DB initialized.");
+                info!("DB initialized.");
                 return Self::connect();
             }
             

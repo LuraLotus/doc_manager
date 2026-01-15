@@ -3,18 +3,18 @@ pub(crate) mod document_list {
 
     use caesium::{compress_in_memory, convert_in_memory, parameters::{CSParameters, PngParameters}};
     use file_format::FileFormat;
-    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
+    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, alignment::Vertical::Bottom, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
     use iced::widget::text_input;
-    use iced_aw::{Card, Spinner, TabBarPosition, TabLabel, Tabs, card::Status, drop_down::Offset, style::card};
+    use iced_aw::{Card, Spinner, TabBar, TabBarPosition, TabLabel, Tabs, card::Status, drop_down::Offset, style::{card, tab_bar}};
     use iced_dialog::dialog;
     use image::{DynamicImage, ImageBuffer};
-    use log::{error, info};
+    use log::{error, info, warn};
     use pdfium_render::prelude::{PdfBitmap, PdfBitmapFormat, PdfPageImageObject, PdfPageObjectsCommon, PdfPageOrientation, PdfPagePaperSize, PdfPageRenderRotation, PdfPoints, PdfRenderConfig, Pdfium, PdfiumError, PdfiumLibraryBindings};
     use rfd::FileDialog;
     use rusqlite::ffi::SQLITE_LIMIT_FUNCTION_ARG;
     use time::{Duration, OffsetDateTime, UtcDateTime, macros::format_description};
 
-    use crate::{ERROR_FERRIS, LocalTheme, State, attachment::attachment::Attachment, attachment_page::attachment_page::AttachmentPage, db::db_module::DbConnection, document::document::Document};
+    use crate::{Config, ERROR_FERRIS, LocalTheme, State, attachment::attachment::Attachment, attachment_page::attachment_page::AttachmentPage, db::db_module::DbConnection, document::document::Document};
 
     #[derive(Debug, Clone, Default)]
     pub(crate) struct DocumentList {
@@ -33,7 +33,6 @@ pub(crate) mod document_list {
         create_new_attachment: bool,
         current_file_path: Option<String>,
         selected_file_paths: Option<Vec<PathBuf>>,
-        selected_file_bytes: Option<Vec<Vec<u8>>>,
         scanned_file_bytes: Option<Vec<Vec<u8>>>,
         current_file_bytes: Option<Vec<Vec<u8>>>,
         current_file_handles: Option<Vec<Handle>>,
@@ -69,7 +68,6 @@ pub(crate) mod document_list {
                 create_new_attachment: false,
                 current_file_path: None,
                 selected_file_paths: None,
-                selected_file_bytes: None,
                 scanned_file_bytes: None,
                 current_file_handles: None,
                 current_file_bytes: None,
@@ -89,7 +87,7 @@ pub(crate) mod document_list {
         }
 
         pub(crate) fn set_current_theme(&mut self, theme: LocalTheme) {
-            self.current_theme = Some(theme);
+            self.current_theme = Some(theme.clone());
         }
 
         pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
@@ -746,8 +744,7 @@ pub(crate) mod document_list {
                                         Text::new("Comment").width(Length::FillPortion(1)), 
                                         text_input("", &self.current_comment).on_input(Message::CurrentCommentChange).id(self.input3_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
                                     ].spacing(5).align_y(Center)
-                                ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
-                                
+                                ].spacing(5)).padding(10).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
                             ].spacing(5)
                             ).height(Length::Fill).width(Length::Fill).into()
                         }
@@ -775,7 +772,7 @@ pub(crate) mod document_list {
                                             card.new_document_card().into()
                                         }) 
                                     ).spacing(10).wrap()),
-                                ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
+                                ].spacing(5)).padding(10).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
                             ].spacing(5)
                             ).width(Length::Fill).height(Length::Fill).into()
                         }
@@ -835,7 +832,7 @@ pub(crate) mod document_list {
                                             text_input(&document.get_comment().to_string(), &self.current_comment).on_input(Message::CurrentCommentChange).width(Length::FillPortion(4)).id(self.input3_id.as_ref().unwrap().clone())
                                         ].spacing(5).align_y(Center),
                                         
-                                    ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill),
+                                    ].spacing(5)).padding(10).style(container::bordered_box).width(Length::Fill).height(Length::Fill),
                                 ].spacing(5)
                                 ).height(Length::Fill).width(Length::Fill)
                             },
@@ -938,7 +935,7 @@ pub(crate) mod document_list {
                                                                 ].spacing(5).align_x(Center).width(Length::Fill).height(Length::Fill)
                                                             ).padding(5).style(container::bordered_box).width(Length::FillPortion(3)).height(Length::Fill)
                                                         ].spacing(5),
-                                                    ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
+                                                    ].spacing(5)).padding(10).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
                                                 ].spacing(5)).width(Length::Fill).height(Length::Fill)
                                             },
                                             // Attachment List Screen
@@ -961,7 +958,7 @@ pub(crate) mod document_list {
                                                         }).map(|card| {
                                                             card.new_attachment_card().into()
                                                         })).spacing(10).wrap()),
-                                                    ].spacing(5)).style(container::bordered_box).padding(5).width(Length::Fill).height(Length::Fill),
+                                                    ].spacing(5)).style(container::bordered_box).padding(10).width(Length::Fill).height(Length::Fill),
                                                 ].spacing(5)
                                                 ).width(Length::Fill).height(Length::Fill)
                                             }
@@ -1090,22 +1087,14 @@ pub(crate) mod document_list {
                                                         ].spacing(5).align_x(Center)
                                                     ).padding(5).style(container::bordered_box).width(Length::FillPortion(3)).height(Length::Fill)
                                                 ].spacing(5),
-                                            ].spacing(5)).padding(5).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
+                                            ].spacing(5)).padding(10).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
                                         ].spacing(5)
                                         ).height(Length::Fill).width(Length::Fill)
                                     }
                                 }
                             },
                         },
-                        Container::new(
-                            // Navigation Tabs between Document details and attachments
-                            Tabs::new(Message::SwitchTab)
-                                .push(Tab::Details, TabLabel::Text(String::from("Details")), Space::new())
-                                .push(Tab::Attachments, TabLabel::Text(String::from("Attachments")), Space::new())
-                                .tab_bar_position(TabBarPosition::Bottom)
-                                .set_active_tab(&self.current_document_tab)
-                                .height(Length::Shrink)
-                        )
+                        tab_bar(self.current_document_tab.clone())
                     ].spacing(5)).into()
                 }
             }
@@ -1121,14 +1110,16 @@ pub(crate) mod document_list {
                 }
             });
 
-            let tick_event = if self.scanning {
-                iced::time::every(iced::time::Duration::from_millis(100)).map(|_| Message::ScanTick)
-            }
-            else {
-                Subscription::none()
-            };
+            return kb_event
 
-            Subscription::batch(vec![kb_event, tick_event])
+            // let tick_event = if self.scanning {
+            //     iced::time::every(iced::time::Duration::from_millis(100)).map(|_| Message::ScanTick)
+            // }
+            // else {
+            //     Subscription::none()
+            // };
+
+            // Subscription::batch(vec![kb_event, tick_event])
         }
 
         fn add_file_bytes(&mut self, bytes: Vec<u8>) {
@@ -1180,8 +1171,96 @@ pub(crate) mod document_list {
             self.current_page_index = 0;
             self.current_file_handles = None;
         }
+    }
 
-        
+    fn tab_bar(selected_tab: Tab) -> Element<'static, Message> {
+        Container::new(
+            row![
+                button(Text::new("Details").center().size(20).height(Length::Fill)).on_press(Message::SwitchTab(Tab::Details)).style(move |theme, status| 
+                    if selected_tab == Tab::Details {
+                        tab_bar_button_selected_style(theme)
+                    }
+                    else {
+                        tab_bar_button_style(theme, status)
+                    }
+                ).width(Length::FillPortion(1)).height(Length::Fill),
+                button(Text::new("Attachments").center().size(20).height(Length::Fill)).on_press(Message::SwitchTab(Tab::Attachments)).style(move |theme, status|
+                    if selected_tab == Tab::Attachments {
+                        tab_bar_button_selected_style(theme)
+                    }
+                    else {
+                        tab_bar_button_style(theme, status)
+                    }
+                ).width(Length::FillPortion(1)).height(Length::Fill)
+            ].spacing(5).align_y(Center).width(Length::Fill).height(Length::Fixed(40.0))
+        ).padding(5).width(Length::Fill).style(container::bordered_box).into()
+    }
+
+    fn tab_bar_button_style(theme: &Theme, status: iced::widget::button::Status) -> iced::widget::button::Style {
+        match status {
+            button::Status::Active => {
+                iced::widget::button::Style {
+                    text_color: theme.extended_palette().background.weak.text.into(),
+                    background: Some(Color::TRANSPARENT.into()),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 5.0.into()
+                    },
+                    shadow: Default::default(),
+                    snap: false
+                }
+            },
+            button::Status::Hovered => {
+                iced::widget::button::Style {
+                    text_color: theme.extended_palette().background.weaker.text.into(),
+                    background: Some(theme.extended_palette().background.weaker.color.into()),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 5.0.into()
+                    },
+                    shadow: Default::default(),
+                    snap: false
+                }
+            },
+            button::Status::Pressed => iced::widget::button::Style {
+                text_color: theme.extended_palette().background.weak.text.into(),
+                background: Some(theme.extended_palette().background.weak.color.into()),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 5.0.into()
+                },
+                shadow: Default::default(),
+                snap: false
+            },
+            button::Status::Disabled => iced::widget::button::Style {
+                text_color: theme.extended_palette().background.strong.text.into(),
+                background: Some(theme.extended_palette().background.weak.color.into()),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 5.0.into()
+                },
+                shadow: Default::default(),
+                snap: false
+            },
+        }
+    }
+
+    fn tab_bar_button_selected_style(theme: &Theme) -> iced::widget::button::Style {
+        iced::widget::button::Style {
+            text_color: theme.extended_palette().background.strong.text.into(),
+            background: Some(theme.extended_palette().background.strong.color.into()),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 5.0.into()
+            },
+            shadow: Default::default(),
+            snap: false
+        }
     }
 
     fn retreive_documents() -> Vec<Arc<Document>> {
@@ -1474,7 +1553,7 @@ pub(crate) mod document_list {
         None,
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, Default)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub(crate) enum Tab {
         #[default]
         Details,

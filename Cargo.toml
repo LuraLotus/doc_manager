@@ -15,7 +15,7 @@ iced_dialog = "0.14.0"
 image = "0.25.9"
 libcaesium = "0.20.0"
 log = "0.4.29"
-log4rs = "1.4.0"
+log4rs = { version = "1.4.0", features = ["gzip", "rolling_file_appender"] }
 opener = { version = "0.8.3", features = ["reveal"] }
 pdfium-render = { version = "0.8.37", features = ["image"] }
 rfd = "0.16.0"
