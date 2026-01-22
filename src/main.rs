@@ -11,7 +11,7 @@ use std::time::{Instant, SystemTime};
 
 use hide_console_ng::hide_console;
 use iced::alignment::Horizontal::Left;
-use iced::{Border, Color, Element, Length, Subscription, Task, Theme};
+use iced::{Border, Color, Element, Length, Subscription, Task, Theme, window};
 use iced::widget::{Button, Column, Container, Text, button, column, container, row, rule};
 use iced_anim::animated::Mode;
 use iced_anim::{Animated, Animation, AnimationBuilder, Easing};
@@ -42,6 +42,7 @@ use crate::screen::Settings;
 
 const ERROR_FERRIS: &[u8] = include_bytes!("../ferris-error-handling.webp");
 const HOME_IMAGE: &[u8] = include_bytes!("../home.jpg");
+const ICON: &[u8] = include_bytes!("../icon.png");
 
 
 pub fn main() -> iced::Result {
@@ -51,6 +52,11 @@ pub fn main() -> iced::Result {
     .title(State::window_title)
     .theme(State::current_theme)
     .subscription(State::subscription)
+    .window(window::Settings {
+        position: window::Position::Centered,
+        icon: Some(window::icon::from_file_data(ICON, None).unwrap()),
+        ..Default::default()
+    })
     .run()
 }
 
@@ -64,7 +70,7 @@ fn init_logger() {
     let trigger = SizeTrigger::new(10 * 1024 * 1024);
     let policy = CompoundPolicy::new(Box::new(trigger), Box::new(roller));
     let logfile = RollingFileAppender::builder()
-        .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} [{l}] {m}\n")))
+        .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} {M} {L} [{l}] {m}\n")))
         .build(format!("./logs/{}.log", offset_date), Box::new(policy))
         .unwrap();
 

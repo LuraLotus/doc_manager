@@ -1,15 +1,16 @@
 pub(crate) mod document_list {
-    use std::{env::{current_dir, current_exe}, fs, io::Cursor, path::PathBuf, process::Stdio, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+    use std::{env::{current_dir, current_exe}, fs, io::Cursor, os::windows::process::CommandExt, path::PathBuf, process::Stdio, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
     use caesium::{compress_in_memory, convert_in_memory, parameters::{CSParameters, PngParameters}};
     use file_format::FileFormat;
-    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, alignment::Vertical::Bottom, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::events};
+    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, alignment::Vertical::Bottom, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh::{self, WindowsDisplayHandle}, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::{self, events}};
     use iced::widget::text_input;
     use iced_aw::{Card, Spinner, TabBar, TabBarPosition, TabLabel, Tabs, card::Status, drop_down::Offset, style::{card, tab_bar}};
     use iced_dialog::dialog;
     use image::{DynamicImage, ImageBuffer};
     use log::{error, info, warn};
     use pdfium_render::prelude::{PdfBitmap, PdfBitmapFormat, PdfPageImageObject, PdfPageObjectsCommon, PdfPageOrientation, PdfPagePaperSize, PdfPageRenderRotation, PdfPoints, PdfRenderConfig, Pdfium, PdfiumError, PdfiumLibraryBindings};
+    use powershell_script::PsScriptBuilder;
     use rfd::FileDialog;
     use rusqlite::ffi::SQLITE_LIMIT_FUNCTION_ARG;
     use time::{Duration, OffsetDateTime, UtcDateTime, macros::format_description};
@@ -104,6 +105,9 @@ pub(crate) mod document_list {
                     else {
                         let mut conn = DbConnection::new();
                         self.current_document_number = self.current_document_number.trim().to_string();
+                        self.current_document_number = self.current_document_number.trim_end_matches(|c: char| {
+                            c.is_whitespace() || c == '.'
+                        }).to_string();
                         match conn.new_document(
                             self.current_document_number.clone(),
                             self.current_document_type.clone(), 
@@ -146,7 +150,20 @@ pub(crate) mod document_list {
                     else {
                         let mut conn=  DbConnection::new();
                         let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
+                        let old_document_number = self.current_open_document.as_ref().unwrap().get_document_number();
                         self.current_document_number = self.current_document_number.trim().to_string();
+                        self.current_document_number = self.current_document_number.trim_end_matches(|c: char| {
+                            c.is_whitespace() || c == '.'
+                        }).to_string();
+                        let old_path = format!("./data/{}", old_document_number);
+                        let path = format!("./data/{}", self.current_document_number.clone());
+                        match fs::rename(&old_path, &path) {
+                            Err(err) => {
+                                error!("Error renaming data directory: {}", err);
+                                panic!("Error renaming data directory: {}", err);
+                            },
+                            _ => {}
+                        }
                         match conn.edit_document_details(
                             current_document_id,
                             self.current_document_number.clone(),
@@ -154,6 +171,7 @@ pub(crate) mod document_list {
                             self.current_comment.clone()
                         ) {
                             Err(err) => {
+                                println!("Error editing document: {}", err);
                                 error!("Error editing document: {}", err);
                             },
                             _ => {}
@@ -162,6 +180,9 @@ pub(crate) mod document_list {
                         self.reset_state();
                         self.documents = retreive_documents();
                         self.current_open_document = self.documents.iter().find(|document| document.get_document_id() == current_document_id).cloned();
+                        self.current_document_number = self.current_open_document.as_ref().unwrap().get_document_number().to_string();
+                        self.current_document_type = self.current_open_document.as_ref().unwrap().get_document_type().to_string();
+                        self.current_comment = self.current_open_document.as_ref().unwrap().get_comment().to_string();
                     }
                     
                     Task::none()
@@ -182,17 +203,44 @@ pub(crate) mod document_list {
                 Message::Back => { Task::none() },
                 Message::None => { Task::none() },
                 Message::CurrentDocumentNumberChange(input) => {
-                    self.current_document_number = input;
+                    self.current_document_number = input
+                        .replace("<", "")
+                        .replace(">", "")
+                        .replace(":", "")
+                        .replace("\"", "")
+                        .replace("/", "")
+                        .replace("\\", "")
+                        .replace("|", "")
+                        .replace("?", "")
+                        .replace("*", "");
                     self.data_changed = true;
                     Task::none()
                 },
                 Message::CurrentDocumentTypeChange(input) => {
-                    self.current_document_type = input;
+                    self.current_document_type = input
+                        .replace("<", "")
+                        .replace(">", "")
+                        .replace(":", "")
+                        .replace("\"", "")
+                        .replace("/", "")
+                        .replace("\\", "")
+                        .replace("|", "")
+                        .replace("?", "")
+                        .replace("*", "");
                     self.data_changed = true;
                     Task::none()
                 },
                 Message::CurrentCommentChange(input) => {
-                    self.current_comment = input;
+                    self.current_comment = input
+                        .replace("<", "")
+                        .replace(">", "")
+                        .replace(":", "")
+                        .replace("\"", "")
+                        .replace("/", "")
+                        .replace("\\", "")
+                        .replace("|", "")
+                        .replace("?", "")
+                        .replace("*", "");
                     self.data_changed = true;
                     Task::none()
                 },
@@ -248,6 +296,9 @@ pub(crate) mod document_list {
                     }
                     else {
                         self.current_attachment_reference_number = self.current_attachment_reference_number.trim().to_string();
+                        self.current_attachment_reference_number = self.current_attachment_reference_number.trim_end_matches(|c: char| {
+                            c.is_whitespace() || c == '.'
+                        }).to_string();
                         let file_path = format!("./data/{}/{}", self.current_open_document.as_ref().unwrap().get_document_number(), self.current_attachment_reference_number);
                         match fs::create_dir(&file_path) {
                             Err(err) => {
@@ -335,6 +386,9 @@ pub(crate) mod document_list {
                         }
 
                         self.current_attachment_reference_number = self.current_attachment_reference_number.trim().to_string();
+                        self.current_attachment_reference_number = self.current_attachment_reference_number.trim_end_matches(|c: char| {
+                            c.is_whitespace() || c == '.'
+                        }).to_string();
                         
                         match conn.edit_attachment_details(
                             current_attachment_id,
@@ -452,12 +506,30 @@ pub(crate) mod document_list {
                     Task::none()
                 },
                 Message::CurrentAttachmentReferenceNumberChange(input) => {
-                    self.current_attachment_reference_number = input;
+                    self.current_attachment_reference_number = input
+                        .replace("<", "")
+                        .replace(">", "")
+                        .replace(":", "")
+                        .replace("\"", "")
+                        .replace("/", "")
+                        .replace("\\", "")
+                        .replace("|", "")
+                        .replace("?", "")
+                        .replace("*", "");
                     self.data_changed = true;
                     Task::none()
                 },
                 Message::CurrentAttachmentCommentChange(input) => {
-                    self.current_attachment_comment = input;
+                    self.current_attachment_comment = input
+                        .replace("<", "")
+                        .replace(">", "")
+                        .replace(":", "")
+                        .replace("\"", "")
+                        .replace("/", "")
+                        .replace("\\", "")
+                        .replace("|", "")
+                        .replace("?", "")
+                        .replace("*", "");
                     self.data_changed = true;
                     Task::none()
                 },
@@ -482,23 +554,36 @@ pub(crate) mod document_list {
                     if let Some(parent) = temp_path.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
-
+                    
                     return Task::perform(
                         async move {
                             let script = format!(r#"
+                                Add-Type -AssemblyName System.Windows.Forms
+                                [System.Windows.Forms.Application]::EnableVisualStyles()
+                                $parentForm = New-Object System.Windows.Forms.Form
+                                $parentForm.TopMost = $true
+                                $parentForm.Width = 0.1
+                                $parentForm.Height = 0.1
+                                $parentForm.Opacity = 0.001
+                                $parentForm.StartPosition = "CenterScreen"
+                                $parentForm.Show()
+                                $parentForm.Activate()
                                 $out = '{}';
-                                $d = New-Object -ComObject WIA.CommonDialog;
-                                $device = $d.ShowSelectDevice();
+                                $d = New-Object -ComObject WIA.CommonDialog
+                                $device = $d.ShowSelectDevice()
+                                
                                 if ($device -ne $null) {{
                                     try {{
-                                        $img = $d.ShowAcquireImage($device.DeviceID);
+
+                                        $img = $d.ShowAcquireImage($device)
                                     }} catch {{
-                                        $img = $d.ShowAcquireImage();
+                                        $img = $d.ShowAcquireImage()
                                     }}
                                 }}
+                                $parentForm.Dispose()
                                 if ($img -ne $null) {{ 
-                                    $img.SaveFile($out); 
-                                    Write-Output $out;
+                                    $img.SaveFile($out)
+                                    Write-Output $out
                                     exit 0
                                 }}
                                 else {{ 
@@ -507,26 +592,33 @@ pub(crate) mod document_list {
                                 "#,
                                 temp_path.to_string_lossy()
                             );
-                            
 
-                            let output = std::process::Command::new("powershell.exe")
-                                .arg("-WindowStyle")
-                                .arg("Hidden")
-                                .arg("-NoProfile")
-                                .arg("-ExecutionPolicy")
-                                .arg("Bypass")
-                                .arg("-Command")
-                                .arg(script)
-                                .stdin(Stdio::null())
-                                .output();
+                            let script_path = std::env::temp_dir().join(format!("scan_script.ps1"));
+                            match fs::write(&script_path, &script) {
+                                Err(err) => {
+                                    error!("Error writing Powershell script to temp file: {}", err);
+                                    panic!("Error writing Powershell script to temp file: {}", err);
+                                },
+                                _ => {}
+                            }
+
+                            let script_runner = PsScriptBuilder::new().no_profile(true).hidden(true).build();
+                            let output = script_runner.run(&script);
+
+                            match fs::remove_file(&script_path) {
+                                Err(err) => {
+                                    error!("Error deleting script temp file: {}", err);
+                                },
+                                _ => {}
+                            }
 
                             match output {
-                                Ok(out) if out.status.success() => {
+                                Ok(out) if out.success() => {
                                     info!("Success");
-                                    String::from_utf8_lossy(&out.stdout).trim().to_string()
+                                    out.stdout().unwrap()
                                 }
                                 Ok(out) => {
-                                    error!("Scan failed, stderr: {}", String::from_utf8_lossy(&out.stderr));
+                                    error!("Scan failed, stderr: {}", &out.stderr().unwrap());
                                     String::new()
                                 }
                                 Err(err) => {
@@ -947,7 +1039,7 @@ pub(crate) mod document_list {
                                                     ].spacing(5).align_y(Center)).width(Length::Fill).padding(5).style(container::bordered_box),
                                                     Container::new(column![
                                                         row![
-                                                            Text::new("Attachments").size(20).align_y(Center),
+                                                            Text::new(format!("{} - Attachments", self.current_open_document.as_ref().unwrap().get_document_number())).size(20).align_y(Center),
                                                             Space::new().width(Length::Fill),
                                                             text_input("Search", &self.search_text).on_input(Message::SearchTextChange).id(Id::new("search"))
                                                         ],
@@ -1151,6 +1243,7 @@ pub(crate) mod document_list {
             self.current_document_type.clear();
             self.current_comment.clear();
             self.create_new_document = false;
+            self.current_document_tab = Tab::Details;
             self.reset_attachment_state();
         }
 
