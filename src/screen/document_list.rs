@@ -1,6 +1,7 @@
 pub(crate) mod document_list {
     use std::{env::{current_dir, current_exe}, fs, io::Cursor, os::windows::process::CommandExt, path::PathBuf, process::Stdio, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
+    use base64::{Engine, prelude::BASE64_STANDARD};
     use caesium::{compress_in_memory, convert_in_memory, parameters::{CSParameters, PngParameters}};
     use file_format::FileFormat;
     use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, alignment::Vertical::Bottom, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh::{self, WindowsDisplayHandle}, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::{self, events}};
@@ -13,6 +14,7 @@ pub(crate) mod document_list {
     use powershell_script::PsScriptBuilder;
     use rfd::FileDialog;
     use rusqlite::ffi::SQLITE_LIMIT_FUNCTION_ARG;
+    use tempfile::tempfile;
     use time::{Duration, OffsetDateTime, UtcDateTime, macros::format_description};
 
     use crate::{Config, ERROR_FERRIS, LocalTheme, State, attachment::attachment::Attachment, attachment_page::attachment_page::AttachmentPage, db::db_module::DbConnection, document::document::Document};
@@ -32,7 +34,6 @@ pub(crate) mod document_list {
         data_changed: bool,
         create_new_document: bool,
         create_new_attachment: bool,
-        current_file_path: Option<String>,
         selected_file_paths: Option<Vec<PathBuf>>,
         scanned_file_bytes: Option<Vec<Vec<u8>>>,
         current_file_bytes: Option<Vec<Vec<u8>>>,
@@ -67,7 +68,6 @@ pub(crate) mod document_list {
                 data_changed: false,
                 create_new_document: false,
                 create_new_attachment: false,
-                current_file_path: None,
                 selected_file_paths: None,
                 scanned_file_bytes: None,
                 current_file_handles: None,
@@ -549,88 +549,70 @@ pub(crate) mod document_list {
                 Message::Scan => {
                     self.scanning = true;
                     self.scan_progress = 0.3;
-                    let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-                    let temp_path = std::env::temp_dir().join("temp").join(format!("scan_{}.png", time));
+                    let temp_path = std::env::temp_dir().join("scan_temp.bmp");
                     if let Some(parent) = temp_path.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
-                    
+
                     return Task::perform(
                         async move {
                             let script = format!(r#"
-                                Add-Type -AssemblyName System.Windows.Forms
-                                [System.Windows.Forms.Application]::EnableVisualStyles()
-                                $parentForm = New-Object System.Windows.Forms.Form
-                                $parentForm.TopMost = $true
-                                $parentForm.Width = 0.1
-                                $parentForm.Height = 0.1
-                                $parentForm.Opacity = 0.001
-                                $parentForm.StartPosition = "CenterScreen"
-                                $parentForm.Show()
-                                $parentForm.Activate()
-                                $out = '{}';
-                                $d = New-Object -ComObject WIA.CommonDialog
-                                $device = $d.ShowSelectDevice()
-                                
-                                if ($device -ne $null) {{
-                                    try {{
-
-                                        $img = $d.ShowAcquireImage($device)
-                                    }} catch {{
-                                        $img = $d.ShowAcquireImage()
+                                    Add-Type -AssemblyName System.Windows.Forms
+                                    [System.Windows.Forms.Application]::EnableVisualStyles()
+                                    $parentForm = New-Object System.Windows.Forms.Form
+                                    $parentForm.TopMost = $true
+                                    $parentForm.Width = 0.1
+                                    $parentForm.Height = 0.1
+                                    $parentForm.Opacity = 0.001
+                                    $parentForm.StartPosition = "CenterScreen"
+                                    $parentForm.Show()
+                                    $parentForm.Activate()
+                                    $out = "{}"
+                                    $d = New-Object -ComObject WIA.CommonDialog
+                                    $device = $d.ShowSelectDevice()
+                                    
+                                    if ($device -ne $null) {{
+                                        try {{
+                                            $img = $d.ShowAcquireImage($device)
+                                        }} catch {{
+                                            $img = $d.ShowAcquireImage()
+                                        }}
                                     }}
-                                }}
-                                $parentForm.Dispose()
-                                if ($img -ne $null) {{ 
-                                    $img.SaveFile($out)
-                                    Write-Output $out
-                                    exit 0
-                                }}
-                                else {{ 
-                                    exit 1
-                                }}
+                                    $parentForm.Dispose()
+                                    if ($img -ne $null) {{ 
+                                        $img.SaveFile($out)
+                                        Write-Output $out
+                                        exit 0
+                                    }}
+                                    else {{ 
+                                        exit 1
+                                    }}
                                 "#,
-                                temp_path.to_string_lossy()
+                                &temp_path.to_string_lossy()
                             );
-
-                            let script_path = std::env::temp_dir().join(format!("scan_script.ps1"));
-                            match fs::write(&script_path, &script) {
-                                Err(err) => {
-                                    error!("Error writing Powershell script to temp file: {}", err);
-                                    panic!("Error writing Powershell script to temp file: {}", err);
-                                },
-                                _ => {}
-                            }
 
                             let script_runner = PsScriptBuilder::new().no_profile(true).hidden(true).build();
                             let output = script_runner.run(&script);
 
-                            match fs::remove_file(&script_path) {
-                                Err(err) => {
-                                    error!("Error deleting script temp file: {}", err);
-                                },
-                                _ => {}
-                            }
-
                             match output {
                                 Ok(out) if out.success() => {
                                     info!("Success");
-                                    out.stdout().unwrap()
-                                }
+                                    temp_path
+                                },
                                 Ok(out) => {
                                     error!("Scan failed, stderr: {}", &out.stderr().unwrap());
-                                    String::new()
-                                }
+                                    PathBuf::new()
+                                },
                                 Err(err) => {
                                     error!("Error running powershell command: {}", err);
-                                    String::new()
-                                }
-                                _ => String::new()
+                                    PathBuf::new()
+                                },
+                                _ => PathBuf::new()
                             }
                         },
 
                         move |path| {
-                            if path.is_empty() {
+                            if path.as_os_str().is_empty() {
                                 Message::ScanFail
                             }
                             else {
@@ -639,10 +621,11 @@ pub(crate) mod document_list {
                         }
                     )
                 },
-                Message::Scanned(temp_path) => {
+                Message::Scanned(path) => {
                     self.scanning = false;
                     self.scan_progress = 1.0;
-                    match fs::read(&temp_path) {
+                    println!("{}", &path.to_string_lossy());
+                    match fs::read(&path) {
                         Ok(bytes) => {
                             self.file_scanned = true;
                             self.files_changed = true;
@@ -658,8 +641,11 @@ pub(crate) mod document_list {
                         },
                         Err(err) => {
                             error!("Error reading scanned image: {}", err);
-                            self.current_file_path = None;
                         }
+                    }
+                    match fs::remove_file(&path) {
+                        Err(err) => error!("Error removing temp file: {}", err),
+                        _ => {}
                     }
                     Task::none()
                 },
@@ -1105,7 +1091,7 @@ pub(crate) mod document_list {
                                                         ].width(Length::FillPortion(1)),
                                                         column![
                                                             row![
-                                                                if self.show_empty_field_warning && self.current_file_path.is_none() {
+                                                                if self.show_empty_field_warning && self.current_file_handles.as_ref().unwrap().len() == 0 {
                                                                     text_input("", &self.current_file_handles.as_ref().unwrap().len().to_string().as_str()).style(|theme, _| empty_text_input_warning(theme))
                                                                 }
                                                                 else {
@@ -1252,7 +1238,6 @@ pub(crate) mod document_list {
             self.current_attachment_reference_number.clear();
             self.current_attachment_comment.clear();
             self.current_file_bytes = None;
-            self.current_file_path = None;
             self.data_changed = false;
             self.files_changed = false;
             self.file_scanned = false;

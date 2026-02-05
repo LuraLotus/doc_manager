@@ -1,9 +1,10 @@
 [package]
 name = "doc_manager"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 
 [dependencies]
+base64 = "0.22.1"
 features = "0.10.0"
 file-format = "0.28.0"
 hide_console_ng = "0.1.0"
@@ -22,6 +23,7 @@ powershell_script = { version = "1.1.0", features = ["core"] }
 rfd = "0.16.0"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
+tempfile = "3.24.0"
 time = { version = "0.3.44", features = ["formatting", "local-offset", "macros", "parsing"] }
 toml = "0.9.8"
 
