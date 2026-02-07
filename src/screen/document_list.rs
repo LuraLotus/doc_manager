@@ -253,8 +253,7 @@ pub(crate) mod document_list {
                 Message::OpenFileDialog => {
                     let previous_file_paths = self.selected_file_paths.clone();
                     self.selected_file_paths = FileDialog::new().set_title("Select Document")
-                        .add_filter("Image (.png, .jpg, .jpeg, .webp)", &["png", "jpg", "jpeg", "webp"])
-                        .add_filter("PDF (.pdf)", &["pdf"])
+                        .add_filter("Image/PDF (.png, .jpg, .jpeg, .webp)", &["png", "jpg", "jpeg", "webp", "pdf"])
                         .pick_files().and_then(|paths| {
                             self.files_changed = true;
                             Some(paths)
@@ -1486,12 +1485,14 @@ pub(crate) mod document_list {
                 pdfium.create_new_pdf().unwrap()
             }
         };
-        let config = PdfRenderConfig::new()
-            .rotate_if_landscape(PdfPageRenderRotation::None, true)
-            .set_fixed_size(2480, 3508);
+        
         let mut bitmaps: Vec<Vec<u8>> = Vec::new();
 
         for page in document.pages().iter() {
+            let mut config = PdfRenderConfig::new().set_fixed_size(2480, 3508);
+            if page.is_landscape() {
+                config = PdfRenderConfig::new().set_fixed_size(3508, 2480);
+            }
             let mut bytes: Vec<u8> = Vec::new();
             match page.render_with_config(&config).unwrap()
                 .as_image()
@@ -1524,12 +1525,27 @@ pub(crate) mod document_list {
             let raw_bytes = match image::load_from_memory(&bytes) {
                 Ok(bytes) => {
                     let mut converted_bytes: Vec<u8> = Vec::new();
-                    match bytes.resize(2480, 3508, image::imageops::FilterType::Lanczos3).write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
-                        Err(err) => {
-                            error!("Error converting image: {}", err);
+                    if bytes.width() > bytes.height() {
+                        match bytes.resize(3508, 2480, image::imageops::FilterType::Lanczos3).write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
+                            Err(err) => {
+                                error!("Error converting image: {}", err);
+                            }
+                            _ => {}
                         }
-                        _ => {}
+                        width = (3508 / 300 * 72) as f32;
+                        height = (2480 / 300 * 72) as f32;
                     }
+                    else {
+                        match bytes.resize(2480, 3508, image::imageops::FilterType::Lanczos3).write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
+                            Err(err) => {
+                                error!("Error converting image: {}", err);
+                            }
+                            _ => {}
+                        }
+                        width = (2480 / 300 * 72) as f32;
+                        height = (3508 / 300 * 72) as f32;
+                    }
+                    
 
                     let mut parameters = CSParameters::new();
                     parameters.png.quality = 10;
@@ -1541,8 +1557,7 @@ pub(crate) mod document_list {
                             panic!("Error compressing image: {}", err);
                         }
                     };
-                    width = (2480 / 300 * 72) as f32;
-                    height = (3508 / 300 * 72) as f32;
+                    
 
                     Some(match image::load_from_memory(&compressed_bytes) {
                         Ok(image) => image,
@@ -1557,21 +1572,42 @@ pub(crate) mod document_list {
                     panic!("Error loading image from memory: {}", err);
                 }
             };
-
-            let mut page = match document.pages_mut().create_page_at_end(PdfPagePaperSize::a4()) {
-                Ok(page) => page,
-                Err(err) => {
-                    error!("Error creating PDF page: {}", err);
-                    panic!("Error creating PDF page: {}", err);
-                }
-            };
-            match page.objects_mut().create_image_object((PdfPagePaperSize::a4().width() - PdfPoints::new(width)) / 2.0, (PdfPagePaperSize::a4().height() - PdfPoints::new(height)) / 2.0, raw_bytes.as_ref().unwrap(), Some(PdfPoints::new(width)), Some(PdfPoints::new(height))) {
-                Err(err) => {
-                    error!("Error adding image to PDF page: {}", err);
-                    panic!("Error adding image to PDF page: {}", err);
+            let mut page = match width > height {
+                true => match document.pages_mut().create_page_at_end(PdfPagePaperSize::a4().landscape()) {
+                    Ok(page) => page,
+                    Err(err) => {
+                        error!("Error creating PDF page: {}", err);
+                        panic!("Error creating PDF page: {}", err);
+                    }
                 },
-                _ => {}
+                false => match document.pages_mut().create_page_at_end(PdfPagePaperSize::a4()) {
+                    Ok(page) => page,
+                    Err(err) => {
+                        error!("Error creating PDF page: {}", err);
+                        panic!("Error creating PDF page: {}", err);
+                    }
+                },
             };
+            
+            if width > height {
+                match page.objects_mut().create_image_object((PdfPagePaperSize::a4().height() - PdfPoints::new(width)) / 2.0, (PdfPagePaperSize::a4().width() - PdfPoints::new(height)) / 2.0, raw_bytes.as_ref().unwrap(), Some(PdfPoints::new(width)), Some(PdfPoints::new(height))) {
+                    Err(err) => {
+                        error!("Error adding image to PDF page: {}", err);
+                        panic!("Error adding image to PDF page: {}", err);
+                    },
+                    _ => {}
+                };
+            }
+            else {
+                match page.objects_mut().create_image_object((PdfPagePaperSize::a4().width() - PdfPoints::new(width)) / 2.0, (PdfPagePaperSize::a4().height() - PdfPoints::new(height)) / 2.0, raw_bytes.as_ref().unwrap(), Some(PdfPoints::new(width)), Some(PdfPoints::new(height))) {
+                    Err(err) => {
+                        error!("Error adding image to PDF page: {}", err);
+                        panic!("Error adding image to PDF page: {}", err);
+                    },
+                    _ => {}
+                };
+            }
+            
         }
 
         match document.save_to_file(&path) {
