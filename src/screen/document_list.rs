@@ -4,7 +4,7 @@ pub(crate) mod document_list {
     use base64::{Engine, prelude::BASE64_STANDARD};
     use caesium::{compress_in_memory, convert_in_memory, parameters::{CSParameters, PngParameters}};
     use file_format::FileFormat;
-    use iced::{Alignment::Center, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, advanced::graphics::futures::subscription, alignment::Vertical::Bottom, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh::{self, WindowsDisplayHandle}, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable}, window::{self, events}};
+    use iced::{Alignment::{self, Center}, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, Window, advanced::graphics::{core::window, futures::subscription}, alignment::Vertical::Bottom, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh::{self, WindowsDisplayHandle}, widget::{Container, Id, MouseArea, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable, stack}, window::{Settings, events}};
     use iced::widget::text_input;
     use iced_aw::{Card, Spinner, TabBar, TabBarPosition, TabLabel, Tabs, card::Status, drop_down::Offset, style::{card, tab_bar}};
     use iced_dialog::dialog;
@@ -49,7 +49,8 @@ pub(crate) mod document_list {
         scan_progress: f32,
         current_theme: Option<LocalTheme>,
         show_confirm_delete: bool,
-        show_empty_field_warning: bool
+        show_empty_field_warning: bool,
+        show_full_image_viewer: bool
     }
 
     impl DocumentList {
@@ -83,7 +84,8 @@ pub(crate) mod document_list {
                 scan_progress: f32::default(),
                 current_theme: None,
                 show_confirm_delete: false,
-                show_empty_field_warning: false
+                show_empty_field_warning: false,
+                show_full_image_viewer: false
             }
         }
 
@@ -662,12 +664,36 @@ pub(crate) mod document_list {
                     }
                     Task::none()
                 },
-                Message::FinalizeScan => {
-                    for bytes in self.scanned_file_bytes.as_ref().unwrap() {
-                        self.current_file_handles.as_mut().unwrap().push(Handle::from_bytes(bytes.to_vec()));
-                    }
+                Message::RotateImage => {
+                    let current_file_bytes = self.current_file_bytes.as_ref().unwrap()[self.current_page_index].clone();
+                    let current_image = match image::load_from_memory(&current_file_bytes) {
+                        Ok(image) => image,
+                        Err(err) => {
+                            error!("Error loading current selected image: {}", err);
+                            panic!("Error loading current selected image: {}", err);
+                        }
+                    };
+                    let rotated_image = current_image.rotate90();
+                    let mut rotated_bytes: Vec<u8> = Vec::new();
+                    match rotated_image.write_to(&mut Cursor::new(&mut rotated_bytes), image::ImageFormat::Png) {
+                        Err(err) => {
+                            error!("Error rotating image: {}", err);
+                        },
+                        _ => {}
+                    };
+                    self.current_file_bytes.as_mut().unwrap()[self.current_page_index] = rotated_bytes;
+                    self.update_file_handles();
+                    self.files_changed = true;
                     Task::none()
                 },
+                Message::OpenFullImageViewer => {
+                    self.show_full_image_viewer = true;
+                    Task::none()
+                },
+                Message::CloseFullImageViewer => {
+                    self.show_full_image_viewer = false;
+                    Task::none()
+                }
                 Message::ClearImageFiles => {
                     self.current_file_bytes = None;
                     self.update_file_handles();
@@ -762,23 +788,6 @@ pub(crate) mod document_list {
 
 
         pub(crate) fn view(&self) -> Element<Message> {
-            let test_linear = Linear {
-                stops: [
-                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(1.0, 0.0, 0.0)}),
-                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(1.0, 0.0, 0.0)}),
-                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(1.0, 0.0, 0.0)}),
-                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(1.0, 0.0, 0.0)}),
-                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(0.0, 0.0, 1.0)}),
-                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(0.0, 0.0, 1.0)}),
-                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(0.0, 0.0, 1.0)}),
-                    Some(ColorStop { offset: 0.0, color: Color::from_rgb(0.0, 0.0, 1.0)}),
-                ],
-                angle: 30.into(),
-            };
-
-            let test_gradient = Gradient::Linear(test_linear);
-            let test_background = Background::Gradient(test_gradient);
-
             //let mut document_cards: Vec<MouseArea<'static, Message>> = Vec::new();
             let mut document_cards: Vec<DataCard> = Vec::new();
 
@@ -786,43 +795,43 @@ pub(crate) mod document_list {
                 document_cards.push(DataCard::new(Some(document.clone()), None, self.current_theme.clone().unwrap()));
             }
 
-            match &self.current_open_document {
+            let main_content = match &self.current_open_document {
                 None => {
                     match self.create_new_document {
                         // New Document Screen
                         true => {
                             Container::new(column![
-                                Container::new(row![
-                                    button("<").on_press(Message::CloseDocument),
-                                    button("Save").on_press(Message::SaveNewDocument),
-                                ].spacing(5)).width(Length::Fill).padding(5).style(container::bordered_box),
-                                Container::new(column![
-                                    row![
-                                        Text::new("New Document").size(20).align_y(Center)
-                                    ].spacing(5).align_y(Center),
-                                    rule::horizontal(2),
-                                    row![
+                                    Container::new(row![
+                                        button("<").on_press(Message::CloseDocument),
+                                        button("Save").on_press(Message::SaveNewDocument),
+                                    ].spacing(5)).width(Length::Fill).padding(5).style(container::bordered_box),
+                                    Container::new(column![
                                         row![
-                                            Text::new("Document Number "),
-                                            Text::new("*").color(Color::from_rgb(1.0, 0.0, 0.0))
-                                        ].width(Length::FillPortion(1)),
-                                        if self.show_empty_field_warning && self.current_document_number.is_empty() {
-                                            text_input("", &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).id(self.input1_id.as_ref().unwrap().clone()).width(Length::FillPortion(4)).style(|theme, _| empty_text_input_warning(theme))
-                                        }
-                                        else {
-                                            text_input("", &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).id(self.input1_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
-                                        }
-                                    ].spacing(5).align_y(Center),
-                                    row![
-                                        Text::new("Document Type").width(Length::FillPortion(1)), 
-                                        text_input("", &self.current_document_type).on_input(Message::CurrentDocumentTypeChange).id(self.input2_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
-                                    ].spacing(5).align_y(Center),
-                                    row![
-                                        Text::new("Comment").width(Length::FillPortion(1)), 
-                                        text_input("", &self.current_comment).on_input(Message::CurrentCommentChange).id(self.input3_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
-                                    ].spacing(5).align_y(Center)
-                                ].spacing(5)).padding(10).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
-                            ].spacing(5)
+                                            Text::new("New Document").size(20).align_y(Center)
+                                        ].spacing(5).align_y(Center),
+                                        rule::horizontal(2),
+                                        row![
+                                            row![
+                                                Text::new("Document Number "),
+                                                Text::new("*").color(Color::from_rgb(1.0, 0.0, 0.0))
+                                            ].width(Length::FillPortion(1)),
+                                            if self.show_empty_field_warning && self.current_document_number.is_empty() {
+                                                text_input("", &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).id(self.input1_id.as_ref().unwrap().clone()).width(Length::FillPortion(4)).style(|theme, _| empty_text_input_warning(theme))
+                                            }
+                                            else {
+                                                text_input("", &self.current_document_number).on_input(Message::CurrentDocumentNumberChange).id(self.input1_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
+                                            }
+                                        ].spacing(5).align_y(Center),
+                                        row![
+                                            Text::new("Document Type").width(Length::FillPortion(1)), 
+                                            text_input("", &self.current_document_type).on_input(Message::CurrentDocumentTypeChange).id(self.input2_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
+                                        ].spacing(5).align_y(Center),
+                                        row![
+                                            Text::new("Comment").width(Length::FillPortion(1)), 
+                                            text_input("", &self.current_comment).on_input(Message::CurrentCommentChange).id(self.input3_id.as_ref().unwrap().clone()).width(Length::FillPortion(4))
+                                        ].spacing(5).align_y(Center)
+                                    ].spacing(5)).padding(10).style(container::bordered_box).width(Length::Fill).height(Length::Fill)
+                                ].spacing(5)
                             ).height(Length::Fill).width(Length::Fill).into()
                         }
                         // Main Document List Screen
@@ -995,20 +1004,37 @@ pub(crate) mod document_list {
                                                                     },
                                                                     rule::horizontal(2),
                                                                     row![
-                                                                        if self.current_page_index > 0 {
-                                                                            button("<").on_press(Message::PrevPage)
-                                                                        }
-                                                                        else {
-                                                                            button("<")
-                                                                        },
-                                                                        Text::new(self.current_page_index + 1),
-                                                                        if self.current_page_index + 1 < self.current_file_handles.as_ref().unwrap().len() {
-                                                                            button(">").on_press(Message::NextPage)
-                                                                        }
-                                                                        else {
-                                                                            button(">")
-                                                                        }
-                                                                    ].spacing(10).align_y(Center)
+                                                                        Space::new().width(Length::FillPortion(1)),
+                                                                        Container::new(
+                                                                            row![
+                                                                                if self.current_page_index > 0 {
+                                                                                    button("<").on_press(Message::PrevPage)
+                                                                                }
+                                                                                else {
+                                                                                    button("<")
+                                                                                },
+                                                                                Text::new(self.current_page_index + 1).center(),
+                                                                                if self.current_page_index + 1 < self.current_file_handles.as_ref().unwrap().len() {
+                                                                                    button(">").on_press(Message::NextPage)
+                                                                                }
+                                                                                else {
+                                                                                    button(">")
+                                                                                }
+                                                                            ].spacing(10).align_y(Center)
+                                                                        ).width(Length::FillPortion(1)).align_x(Center),
+                                                                        Container::new(
+                                                                            row![
+                                                                                if self.current_file_handles.is_none() || self.current_file_handles.as_ref().unwrap().len() == 0 {
+                                                                                    button("↷")
+                                                                                }
+                                                                                else {
+                                                                                    button("↷").on_press(Message::RotateImage)
+                                                                                    
+                                                                                },
+                                                                                button("⛶")
+                                                                            ].spacing(5).align_y(Center)
+                                                                        ).width(Length::FillPortion(1)).align_x(Alignment::End)
+                                                                    ].width(Length::Fill).align_y(Center)
                                                                 ].spacing(5).align_x(Center).width(Length::Fill).height(Length::Fill)
                                                             ).padding(5).style(container::bordered_box).width(Length::FillPortion(3)).height(Length::Fill)
                                                         ].spacing(5),
@@ -1147,20 +1173,40 @@ pub(crate) mod document_list {
                                                             },
                                                             rule::horizontal(2),
                                                             row![
-                                                                if self.current_page_index > 0 {
-                                                                    button("<").on_press(Message::PrevPage)
-                                                                }
-                                                                else {
-                                                                    button("<")
-                                                                },
-                                                                Text::new(self.current_page_index + 1),
-                                                                if self.current_page_index + 1 < self.current_file_handles.as_ref().unwrap().len() {
-                                                                    button(">").on_press(Message::NextPage)
-                                                                }
-                                                                else {
-                                                                    button(">")
-                                                                }
-                                                            ].spacing(10).align_y(Center)
+                                                                Space::new().width(Length::FillPortion(1)),
+                                                                Container::new(
+                                                                    row![
+                                                                        if self.current_page_index > 0 {
+                                                                            button("<").on_press(Message::PrevPage)
+                                                                        }
+                                                                        else {
+                                                                            button("<")
+                                                                        },
+                                                                        Text::new(self.current_page_index + 1).center(),
+                                                                        if self.current_page_index + 1 < self.current_file_handles.as_ref().unwrap().len() {
+                                                                            button(">").on_press(Message::NextPage)
+                                                                        }
+                                                                        else {
+                                                                            button(">")
+                                                                        }
+                                                                    ].spacing(10).align_y(Center)
+                                                                ).width(Length::FillPortion(1)).align_x(Center),
+                                                                Container::new(
+                                                                    if self.current_file_handles.is_none() || self.current_file_handles.as_ref().unwrap().len() == 0 {
+                                                                        
+                                                                        row![
+                                                                            button("↷"),
+                                                                            button("⛶")
+                                                                        ].spacing(5).align_y(Center)
+                                                                    }
+                                                                    else {
+                                                                        row![
+                                                                            button("↷").on_press(Message::RotateImage),
+                                                                            button("⛶").on_press(Message::OpenFullImageViewer)
+                                                                        ].spacing(5).align_y(Center)
+                                                                    }
+                                                                ).width(Length::FillPortion(1)).align_x(Alignment::End)
+                                                            ].width(Length::Fill).align_y(Center)
                                                         ].spacing(5).align_x(Center)
                                                     ).padding(5).style(container::bordered_box).width(Length::FillPortion(3)).height(Length::Fill)
                                                 ].spacing(5),
@@ -1174,6 +1220,59 @@ pub(crate) mod document_list {
                         tab_bar(self.current_document_tab.clone())
                     ].spacing(5)).into()
                 }
+            };
+
+            //let image_viewer: Element<'_, Message, Theme, Renderer> = ;
+
+            if self.show_full_image_viewer {
+                Container::new(
+                    stack![
+                        column![
+                            Viewer::new(self.current_file_handles.as_ref().unwrap()[self.current_page_index].clone()).width(Length::Fill).height(Length::Fill),
+                            row![
+                                Space::new().width(Length::FillPortion(1)),
+                                Container::new(
+                                    row![
+                                        if self.current_page_index > 0 {
+                                            button("<").on_press(Message::PrevPage)
+                                        }
+                                        else {
+                                            button("<")
+                                        },
+                                        Text::new(self.current_page_index + 1).center(),
+                                        if self.current_page_index + 1 < self.current_file_handles.as_ref().unwrap().len() {
+                                            button(">").on_press(Message::NextPage)
+                                        }
+                                        else {
+                                            button(">")
+                                        }
+                                    ].spacing(10).align_y(Center)
+                                ).width(Length::FillPortion(1)).align_x(Center),
+                                Container::new(
+                                    if self.current_file_handles.is_none() || self.current_file_handles.as_ref().unwrap().len() == 0 {
+                                        
+                                        row![
+                                            button("↷"),
+                                            button("⛶")
+                                        ].spacing(5).align_y(Center)
+                                    }
+                                    else {
+                                        row![
+                                            button("↷").on_press(Message::RotateImage),
+                                            button("⛶").on_press(Message::CloseFullImageViewer)
+                                        ].spacing(5).align_y(Center)
+                                    }
+                                ).width(Length::FillPortion(1)).align_x(Alignment::End)
+                            ].width(Length::Fill).align_y(Center),
+                        ].spacing(5),
+                        Container::new(
+                            button(Text::new("⨉").center()).on_press(Message::CloseFullImageViewer)
+                        ).width(Length::Fill).align_x(Alignment::End)
+                    ].width(Length::Fill).height(Length::Fill),
+                ).padding(5).style(container::bordered_box).into()
+            }
+            else {
+                main_content
             }
         }
 
@@ -1657,7 +1756,9 @@ pub(crate) mod document_list {
         Scanned(PathBuf),
         ScanFail,
         ScanTick,
-        FinalizeScan,
+        RotateImage,
+        OpenFullImageViewer,
+        CloseFullImageViewer,
         ClearImageFiles,
         ExportToPdf,
         ExportSuccess(PathBuf),

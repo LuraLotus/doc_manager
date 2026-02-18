@@ -12,7 +12,7 @@ use std::time::{Instant, SystemTime};
 use hide_console_ng::hide_console;
 use iced::alignment::Horizontal::Left;
 use iced::{Border, Color, Element, Length, Subscription, Task, Theme, window};
-use iced::widget::{Button, Column, Container, Text, button, column, container, row, rule};
+use iced::widget::{Button, Column, Container, Row, Space, Text, button, column, container, row, rule};
 use iced_anim::animated::Mode;
 use iced_anim::{Animated, Animation, AnimationBuilder, Easing};
 use iced_aw::core::offset;
@@ -55,7 +55,8 @@ pub fn main() -> iced::Result {
     .window(window::Settings {
         position: window::Position::Centered,
         icon: Some(window::icon::from_file_data(ICON, None).unwrap()),
-        ..Default::default()
+        maximized: true,
+        ..window::Settings::default()
     })
     .run()
 }
@@ -245,7 +246,7 @@ struct State {
     settings: Settings,
     config: Config,
     previous_tab: Option<Tab>,
-    sidebar_button_color: Color
+    show_sidebar: bool
 }
 
 impl State {
@@ -287,7 +288,7 @@ impl State {
             settings,
             config,
             previous_tab: None,
-            sidebar_button_color: Color::default()
+            show_sidebar: true
         };
         state.document_list.set_current_theme(initial_theme);
         return state
@@ -347,9 +348,16 @@ impl State {
                                 self.current_tab = Tab::DocumentList;
                             }
                         }
+                    },
+                    document_list::Message::OpenFullImageViewer => {
+                        self.show_sidebar = false;
+                        return self.document_list.update(document_list_message).map(Message::DocumentList)
+                    },
+                    document_list::Message::CloseFullImageViewer => {
+                        self.show_sidebar = true;
+                        return self.document_list.update(document_list_message).map(Message::DocumentList)
                     }
                     _ => {
-                        //let Screen::DocumentList(screen) = &mut self.current_screen else { return Task::none(); };
                         return self.document_list.update(document_list_message).map(Message::DocumentList)
                     }
                 }
@@ -421,11 +429,16 @@ impl State {
             Tab::DocumentList => self.document_list.view().map(Message::DocumentList),
             Tab::Settings => self.settings.view().map(Message::Settings)
         };
+        let mut content = Row::new().spacing(5);
+        if self.show_sidebar {
+            content = content.push(Container::new(
+                    sidebar(self.current_tab)
+                ).width(Length::FillPortion(1))
+            );
+        }
+        content = content.push(container(screen).width(Length::FillPortion(5)));
         Container::new(row![
-            Container::new(
-                sidebar(self.current_tab)
-            ).width(Length::FillPortion(1)),
-            container(screen).width(Length::FillPortion(5))
+            content
         ].spacing(5)).padding(5).into()
     }
 
