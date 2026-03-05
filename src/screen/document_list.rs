@@ -249,7 +249,8 @@ pub(crate) mod document_list {
                 Message::NewAttachment => {
                     self.reset_attachment_state();
                     self.create_new_attachment = true;
-                    self.current_file_handles = Some(Vec::new());
+                    self.current_file_bytes = Some(Vec::new());
+                    self.update_file_handles();
                     Task::none()
                 },
                 Message::OpenFileDialog => {
@@ -550,7 +551,7 @@ pub(crate) mod document_list {
                 Message::Scan => {
                     self.scanning = true;
                     self.scan_progress = 0.3;
-                    let temp_path = std::env::temp_dir().join("scan_temp.bmp");
+                    let temp_path = std::env::temp_dir().join("scan_temp");
                     if let Some(parent) = temp_path.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
@@ -568,27 +569,42 @@ pub(crate) mod document_list {
                                     $parentForm.StartPosition = "CenterScreen"
                                     $parentForm.Show()
                                     $parentForm.Activate()
-                                    $out = "{}"
                                     $d = New-Object -ComObject WIA.CommonDialog
                                     $device = $d.ShowSelectDevice()
                                     
                                     if ($device -ne $null) {{
                                         try {{
-                                            $img = $d.ShowAcquireImage($device)
+                                            $paths = @()
+                                            while ($true) {{
+                                                $img = $d.ShowAcquireImage($device)
+                                                if ($img -eq $null) {{
+                                                    break
+                                                }}
+                                                $tmp = "{}" -f ([System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), 'bmp'))
+                                                $img.SaveFile($tmp)
+                                                $paths += $tmp
+                                            }}
+                                            $paths -join "`n"
                                         }} catch {{
-                                            $img = $d.ShowAcquireImage()
+                                            $paths = @()
+                                            while ($true) {{
+                                                $img = $d.ShowAcquireImage()
+                                                if ($img -eq $null) {{
+                                                    break
+                                                }}
+                                                $tmp = "{}" -f ([System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), 'bmp'))
+                                                $img.SaveFile($tmp)
+                                                $paths += $tmp
+                                            }}
+                                            $paths -join "`n"
                                         }}
                                     }}
+                                    else {{
+                                        ""
+                                    }}
                                     $parentForm.Dispose()
-                                    if ($img -ne $null) {{ 
-                                        $img.SaveFile($out)
-                                        Write-Output $out
-                                        exit 0
-                                    }}
-                                    else {{ 
-                                        exit 1
-                                    }}
                                 "#,
+                                &temp_path.to_string_lossy(),
                                 &temp_path.to_string_lossy()
                             );
 
@@ -598,55 +614,63 @@ pub(crate) mod document_list {
                             match output {
                                 Ok(out) if out.success() => {
                                     info!("Success");
-                                    temp_path
+                                    out.stdout().unwrap().to_owned()
                                 },
                                 Ok(out) => {
                                     error!("Scan failed, stderr: {}", &out.stderr().unwrap());
-                                    PathBuf::new()
+                                    String::new()
                                 },
                                 Err(err) => {
                                     error!("Error running powershell command: {}", err);
-                                    PathBuf::new()
+                                    String::new()
                                 },
-                                _ => PathBuf::new()
+                                _ => String::new()
                             }
                         },
 
-                        move |path| {
-                            if path.as_os_str().is_empty() {
+                        move |stdout| {
+                            if stdout.trim().is_empty() {
                                 Message::ScanFail
                             }
                             else {
-                                Message::Scanned(path.into())
+                                let paths: Vec<PathBuf> = stdout.lines().map(PathBuf::from).collect();
+                                Message::Scanned(paths)
                             }
                         }
                     )
                 },
-                Message::Scanned(path) => {
+                Message::Scanned(paths) => {
                     self.scanning = false;
                     self.scan_progress = 1.0;
-                    println!("{}", &path.to_string_lossy());
-                    match fs::read(&path) {
-                        Ok(bytes) => {
-                            self.file_scanned = true;
-                            self.files_changed = true;
-                            self.data_changed = true;
-                            let mut converted_bytes: Vec<u8> = Vec::new();
-                            let scanned = image::load_from_memory(&bytes);
-                            match scanned.unwrap().write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png) {
-                                    Err(err) => error!("Error converting scanned image format: {}", err),
-                                    _ => {}
+                    for path in paths {
+                        match fs::read(&path) {
+                            Ok(bytes) => {
+                                self.file_scanned = true;
+                                self.files_changed = true;
+                                self.data_changed = true;
+
+                                let mut converted_bytes: Vec<u8> = Vec::new();
+                                match image::load_from_memory(&bytes) {
+                                    Ok(img) => {
+                                        img.write_to(&mut Cursor::new(&mut converted_bytes), image::ImageFormat::Png)
+                                            .unwrap_or_else(|err| error!("Error converting scanned bytes: {}", err));
+                                    }
+                                    Err(err) => {
+                                        error!("Error loading scanned bytes from memory: {}", err);
+                                    }
                                 }
-                            self.add_file_bytes(converted_bytes);
-                            self.update_file_handles();
-                        },
-                        Err(err) => {
-                            error!("Error reading scanned image: {}", err);
+                                self.add_file_bytes(converted_bytes);
+                                self.update_file_handles();
+                            }
+                            Err(err) => {
+                                error!("Error reading temp file paths: {}", err);
+                            }
+                            
                         }
-                    }
-                    match fs::remove_file(&path) {
-                        Err(err) => error!("Error removing temp file: {}", err),
-                        _ => {}
+                        match fs::remove_file(&path) {
+                            Err(err) => error!("Error removing temp file: {}", err),
+                            _ => {}
+                        }
                     }
                     Task::none()
                 },
@@ -698,19 +722,15 @@ pub(crate) mod document_list {
                     self.current_file_bytes = None;
                     self.update_file_handles();
                     Task::none()
-                }
+                },
                 Message::DeleteDocument => {
                     let mut conn = DbConnection::new();
-                    match conn.delete_document(self.current_open_document.as_ref().unwrap().get_document_id()) {
+                    match conn.set_document_deleted(self.current_open_document.as_ref().unwrap().get_document_id()) {
                         Err(err) => {
                             error!("Error deleting document: {}", err);
                             panic!("Error deleting document: {}", err);
                         },
                         _ => {}
-                    }
-                    match fs::remove_dir_all(format!("./data/{}", self.current_open_document.as_ref().unwrap().get_document_number())) {
-                        Err(err) => error!("Error deleting data directory: {}", err),
-                        Ok(_) => {}
                     }
 
                     self.documents = retreive_documents();
@@ -720,13 +740,9 @@ pub(crate) mod document_list {
                 },
                 Message::DeleteAttachment => {
                     let mut conn = DbConnection::new();
-                    match conn.delete_attachment(self.current_open_attachment.as_ref().unwrap().get_attachment_id()) {
+                    match conn.set_attachment_deleted(self.current_open_attachment.as_ref().unwrap().get_attachment_id()) {
                         Ok(_) => {},
                         Err(err) => error!("Error deleting attachment: {}", err)
-                    }
-                    match fs::remove_dir_all(format!("./data/{}/{}", self.current_open_document.as_ref().unwrap().get_document_number(), self.current_open_attachment.as_ref().unwrap().get_reference_number())) {
-                        Err(err) => error!("Error deleting file: {}", err),
-                        Ok(_) => {}
                     }
 
                     let current_document_id = self.current_open_document.as_ref().unwrap().get_document_id();
@@ -780,14 +796,13 @@ pub(crate) mod document_list {
                     if self.current_page_index < self.current_file_handles.as_ref().unwrap().len() - 1 {
                         self.current_page_index += 1;
                     }
-                    
                     Task::none()
                 }
             }
         }
 
 
-        pub(crate) fn view(&self) -> Element<Message> {
+        pub(crate) fn view(&self) -> Element<'_, Message> {
             //let mut document_cards: Vec<MouseArea<'static, Message>> = Vec::new();
             let mut document_cards: Vec<DataCard> = Vec::new();
 
@@ -800,7 +815,8 @@ pub(crate) mod document_list {
                     match self.create_new_document {
                         // New Document Screen
                         true => {
-                            Container::new(column![
+                            Container::new(
+                                column![
                                     Container::new(row![
                                         button("<").on_press(Message::CloseDocument),
                                         button("Save").on_press(Message::SaveNewDocument),
@@ -1318,10 +1334,9 @@ pub(crate) mod document_list {
                     self.current_file_handles.as_mut().unwrap().push(Handle::from_bytes(bytes.to_vec()));
                 }
             }
-            
         }
 
-        fn reset_state(&mut self) {
+        pub(crate) fn reset_state(&mut self) {
             self.current_open_document = None;
             self.current_document_number.clear();
             self.current_document_type.clear();
@@ -1331,7 +1346,7 @@ pub(crate) mod document_list {
             self.reset_attachment_state();
         }
 
-        fn reset_attachment_state(&mut self) {
+        pub(crate) fn reset_attachment_state(&mut self) {
             self.current_open_attachment = None;
             self.current_attachment_reference_number.clear();
             self.current_attachment_comment.clear();
@@ -1346,6 +1361,11 @@ pub(crate) mod document_list {
             self.show_empty_field_warning = false;
             self.current_page_index = 0;
             self.current_file_handles = None;
+            self.selected_file_paths = None;
+        }
+
+        pub(crate) fn refresh_data(&mut self) {
+            self.documents = retreive_documents();
         }
     }
 
@@ -1753,7 +1773,7 @@ pub(crate) mod document_list {
         Back,
         KeyEvent(Key),
         Scan,
-        Scanned(PathBuf),
+        Scanned(Vec<PathBuf>),
         ScanFail,
         ScanTick,
         RotateImage,

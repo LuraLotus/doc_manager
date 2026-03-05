@@ -1,6 +1,6 @@
 [package]
 name = "doc_manager"
-version = "1.0.4"
+version = "1.2.0"
 edition = "2024"
 
 [dependencies]
@@ -21,7 +21,8 @@ opener = { version = "0.8.3", features = ["reveal"] }
 pdfium-render = { version = "0.8.37", features = ["image"] }
 powershell_script = { version = "1.1.0", features = ["core"] }
 rfd = "0.16.0"
-rusqlite = { version = "0.37.0", features = ["bundled"] }
+rusqlite = { version = "0.38.0", features = ["bundled"] }
+rusqlite_migration = "2.4.1"
 serde = { version = "1.0.228", features = ["derive"] }
 tempfile = "3.24.0"
 time = { version = "0.3.44", features = ["formatting", "local-offset", "macros", "parsing"] }

@@ -50,9 +50,4 @@ pub(crate) mod document {
             return self.date_added
         }
     }
-
-    pub(crate) enum Message {
-        OpenAttachment,
-        None,
-    }
 }

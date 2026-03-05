@@ -10,13 +10,15 @@ use std::path::Path;
 use std::time::{Instant, SystemTime};
 
 use hide_console_ng::hide_console;
-use iced::alignment::Horizontal::Left;
-use iced::{Border, Color, Element, Length, Subscription, Task, Theme, window};
-use iced::widget::{Button, Column, Container, Row, Space, Text, button, column, container, row, rule};
+use iced::alignment::Horizontal::{self, Left};
+use iced::widget::image::Handle;
+use iced::{Alignment, Border, Color, Element, Length, Renderer, Subscription, Task, Theme, window};
+use iced::widget::{Button, Column, Container, Image, Row, Space, Text, button, column, container, row, rule};
 use iced_anim::animated::Mode;
 use iced_anim::{Animated, Animation, AnimationBuilder, Easing};
+use iced_aw::DropDown;
 use iced_aw::core::offset;
-use iced_aw::drop_down::Offset;
+use iced_aw::drop_down::{self, Offset};
 use iced_aw::sidebar::TabLabel;
 use iced_aw::style::{card, sidebar};
 use iced_aw::widget::Sidebar;
@@ -31,12 +33,13 @@ use log4rs::config::{Appender, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use screen::main_menu::main_menu;
 use screen::document_list::document_list;
+use screen::recycle_bin::recycle_bin;
 use screen::settings::settings;
 use serde::{Deserialize, Serialize};
 use time::macros::format_description;
 use time::{OffsetDateTime, UtcDateTime, format_description};
 
-use crate::screen::{MainMenu};
+use crate::screen::{MainMenu, RecycleBin};
 use crate::screen::DocumentList;
 use crate::screen::Settings;
 
@@ -91,7 +94,8 @@ enum Message {
     SelectedTab(Tab),
     MainMenu(main_menu::Message),
     DocumentList(document_list::Message),
-    Settings(settings::Message)
+    RecycleBin(recycle_bin::Message),
+    Settings(settings::Message),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Default, Copy)]
@@ -99,6 +103,7 @@ pub(crate) enum Tab {
     Home,
     #[default]
     DocumentList,
+    RecycleBin,
     Settings
 }
 
@@ -243,10 +248,12 @@ struct State {
     current_tab: Tab,
     main_menu: MainMenu,
     document_list: DocumentList,
+    recycle_bin: RecycleBin,
+    recycle_bin_tab: recycle_bin::Tab,
     settings: Settings,
     config: Config,
     previous_tab: Option<Tab>,
-    show_sidebar: bool
+    show_sidebar: bool,
 }
 
 impl State {
@@ -285,10 +292,12 @@ impl State {
             current_tab: Tab::default(),
             main_menu: MainMenu::new(),
             document_list: DocumentList::new(),
+            recycle_bin: RecycleBin::new(),
+            recycle_bin_tab: recycle_bin::Tab::Document,
             settings,
             config,
             previous_tab: None,
-            show_sidebar: true
+            show_sidebar: true,
         };
         state.document_list.set_current_theme(initial_theme);
         return state
@@ -309,8 +318,21 @@ impl State {
                             self.previous_tab = Some(self.current_tab);
                         }
                         self.document_list.set_current_theme(self.config.current_theme().into());
+                        self.document_list.reset_state();
+                        self.document_list.refresh_data();
+                        self.document_list.reset_attachment_state();
                         self.current_tab = tab;
                     },
+                    Tab::RecycleBin => {
+                        if tab != self.current_tab {
+                            self.previous_tab = Some(self.current_tab);
+                        }
+                        self.recycle_bin.set_current_theme(self.config.current_theme().into());
+                        self.recycle_bin.reset_state();
+                        self.recycle_bin.refresh_data();
+                        self.recycle_bin_tab = recycle_bin::Tab::Document;
+                        self.current_tab = tab;
+                    }
                     Tab::Settings => {
                         if tab != self.current_tab {
                             self.previous_tab = Some(self.current_tab);
@@ -356,9 +378,32 @@ impl State {
                     document_list::Message::CloseFullImageViewer => {
                         self.show_sidebar = true;
                         return self.document_list.update(document_list_message).map(Message::DocumentList)
-                    }
+                    },
                     _ => {
                         return self.document_list.update(document_list_message).map(Message::DocumentList)
+                    }
+                }
+            },
+            Message::RecycleBin(recycle_bin_message) => {
+                match recycle_bin_message {
+                    recycle_bin::Message::Back => {
+                        if self.previous_tab.is_some() {
+                            if self.current_tab != self.previous_tab.unwrap() && self.current_tab != Tab::DocumentList {
+                                self.current_tab = self.previous_tab.unwrap_or_else(|| {
+                                    self.current_tab
+                                });
+                            }
+                            else {
+                                self.current_tab = Tab::DocumentList;
+                            }
+                        }
+                    },
+                    recycle_bin::Message::SwitchTab(tab) => {
+                        self.recycle_bin_tab = tab;
+                        return self.recycle_bin.update(recycle_bin_message).map(Message::RecycleBin)
+                    },
+                    _ => {
+                        return self.recycle_bin.update(recycle_bin_message).map(Message::RecycleBin)
                     }
                 }
             },
@@ -417,7 +462,6 @@ impl State {
                     }
                 }
             }
-            
         }
         Task::none()
     }
@@ -427,12 +471,13 @@ impl State {
         let screen = match &self.current_tab {
             Tab::Home => self.main_menu.view().map(Message::MainMenu),
             Tab::DocumentList => self.document_list.view().map(Message::DocumentList),
+            Tab::RecycleBin => self.recycle_bin.view().map(Message::RecycleBin),
             Tab::Settings => self.settings.view().map(Message::Settings)
         };
         let mut content = Row::new().spacing(5);
         if self.show_sidebar {
             content = content.push(Container::new(
-                    sidebar(self.current_tab)
+                    sidebar(self, self.current_tab)
                 ).width(Length::FillPortion(1))
             );
         }
@@ -446,6 +491,9 @@ impl State {
         match &self.current_tab {
             Tab::DocumentList => {
                 self.document_list.subscription().map(Message::DocumentList)
+            },
+            Tab::RecycleBin => {
+                Subscription::none()
             }
             Tab::Home => {
                 Subscription::none()
@@ -471,34 +519,70 @@ impl Default for State {
     }
 }
 
-fn sidebar(selected_tab: Tab) -> Element<'static, Message> {
-    Container::new(
-        column![
-            // button(Text::from("Home").size(18)).on_press(Message::SelectedTab(Tab::Home)).width(Length::Fill).style(move |theme: &Theme, status| 
-            //     if selected_tab == Tab::Home {
-            //         sidebar_button_selected_style(theme)
-            //     }
-            //     else {
-            //         sidebar_button_style(theme, status)
-            //     }
-            // ),
-            button(Text::from("Document List").size(18)).on_press(Message::SelectedTab(Tab::DocumentList)).width(Length::Fill).style(move |theme: &Theme, status|
-                if selected_tab == Tab::DocumentList {
-                    sidebar_button_selected_style(theme)
-                }
-                else {
-                    sidebar_button_style(theme, status)
-                }
-            ),
-            button(Text::from("Settings").size(18)).on_press(Message::SelectedTab(Tab::Settings)).width(Length::Fill).style(move |theme: &Theme, status|
-                if selected_tab == Tab::Settings {
-                    sidebar_button_selected_style(theme)
-                }
-                else {
-                    sidebar_button_style(theme, status)
-                }
+fn sidebar(state: &State, selected_tab: Tab) -> Element<'static, Message> {
+    let recycle_bin_tab = state.recycle_bin_tab;
+    let mut column: Column<'_, Message, Theme, Renderer> = Column::new().spacing(5).align_x(Horizontal::Left);
+    column = column.push(
+        button(Text::from("Document List").size(18)).on_press(Message::SelectedTab(Tab::DocumentList)).width(Length::Fill).style(move |theme: &Theme, status|
+            if selected_tab == Tab::DocumentList {
+                sidebar_button_selected_style(theme)
+            }
+            else {
+                sidebar_button_style(theme, status)
+            }
+        )
+    );
+    column = column.push(
+        button(row![
+            Text::from("Recycle Bin").size(18),
+            Space::new().width(Length::Fill),
+            Text::from("▼").size(8).height(Length::Fill).center()
+        ]).on_press(Message::SelectedTab(Tab::RecycleBin)).width(Length::Fill).height(Length::Shrink).style(move |theme: &Theme, status|
+            if selected_tab == Tab::RecycleBin {
+                sidebar_button_selected_style(theme)
+            }
+            else {
+                sidebar_button_style(theme, status)
+            }
+        )
+    );
+    if state.current_tab == Tab::RecycleBin {
+        column = column.push(
+            Container::new(
+                column![
+                    button(Text::from("     Documents").size(16)).width(Length::Fill).on_press(Message::RecycleBin(recycle_bin::Message::SwitchTab(recycle_bin::Tab::Document))).style(move |theme: &Theme, status|
+                        if recycle_bin_tab == recycle_bin::Tab::Document {
+                            sidebar_button_selected_style(theme)
+                        }
+                        else {
+                            sidebar_button_style(theme, status)
+                        }
+                    ),
+                    button(Text::from("     Attachments").size(16)).width(Length::Fill).on_press(Message::RecycleBin(recycle_bin::Message::SwitchTab(recycle_bin::Tab::Attachment))).style(move |theme: &Theme, status|
+                        if recycle_bin_tab == recycle_bin::Tab::Attachment {
+                            sidebar_button_selected_style(theme)
+                        }
+                        else {
+                            sidebar_button_style(theme, status)
+                        }
+                    )
+                ].spacing(5)
             )
-        ].spacing(5).align_x(Left)
+        );
+    }
+    column = column.push(
+        button(Text::from("Settings").size(18)).on_press(Message::SelectedTab(Tab::Settings)).width(Length::Fill).style(move |theme: &Theme, status|
+            if selected_tab == Tab::Settings {
+                sidebar_button_selected_style(theme)
+            }
+            else {
+                sidebar_button_style(theme, status)
+            }
+        )
+    );
+
+    Container::new(
+        column
     ).into()
 }
 
