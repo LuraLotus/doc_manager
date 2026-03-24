@@ -9,3 +9,6 @@ data_bak2.db
 doc_manager.log
 log.log
 /logs
+/restored
+doc_manager.zip
+/naps2

@@ -27,6 +27,10 @@ pub(crate) mod attachment_page {
             }
         }
 
+        pub(crate) fn page_id(&self) -> &u32 {
+            return &self.page_id
+        }
+
         pub(crate) fn image(&self) -> &Vec<u8> {
             &self.image
         }

@@ -7,7 +7,7 @@ fn main() {
     // println!("cargo:rustc-link-lib=static=pdfium");
     // println!("cargo:rustc-link-search=native=./");
     if std::env::var_os("CARGO_CFG_WINDOWS").is_some() {
-        let image = image::open("icon.png").expect("Error building application");
+        let image = image::open("assets/icon.png").expect("Error building application");
         let resized_image = image.resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
         let rgba_image = resized_image.to_rgba8();
         let icon_image = IconImage::from_rgba_data(256, 256, rgba_image.to_vec());

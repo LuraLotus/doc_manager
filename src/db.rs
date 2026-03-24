@@ -41,8 +41,7 @@ pub(crate) mod db_module {
                         document_number TEXT NOT NULL UNIQUE,
                         document_type TEXT,
                         comment TEXT,
-                        date_added INTEGER NOT NULL DEFAULT (unixepoch('now')),
-                        date_deleted INTEGER
+                        date_added INTEGER NOT NULL DEFAULT (unixepoch('now'))
                     )", ()
                 ) {
                     Err(err) => {
@@ -58,7 +57,6 @@ pub(crate) mod db_module {
                         comment TEXT,
                         date_added INTEGER NOT NULL DEFAULT (unixepoch('now')),
                         document_id INTEGER NOT NULL,
-                        date_deleted INTEGER
                         FOREIGN KEY(document_id) REFERENCES document(document_id) ON DELETE CASCADE
                     )", ()
                 ) {
@@ -90,37 +88,41 @@ pub(crate) mod db_module {
                     },
                     _ => {}
                 }
+                Self::update_db();
                 info!("DB initialized.");
 
                 return conn;
                 
             }
             else {
-                let mut conn = Self::connect();
-                let migrations = Migrations::new(vec![
-                    M::up("ALTER TABLE document ADD COLUMN date_deleted INTEGER"),
-                    M::up("ALTER TABLE attachment ADD COLUMN date_deleted INTEGER")
-                ]);
+                Self::update_db();
 
-                match migrations.to_latest(&mut conn) {
-                    Ok(_) => info!("Database migration successful"),
-                    Err(err) => error!("Database migration failed: {}", err)
-                }
-
-                match Self::delete_old_inactive_documents(&mut conn) {
-                    Err(err) => error!("Error deleting old inactive documents: {}", err),
-                    _ => {}
-                };
-                match Self::delete_old_inactive_attachments(&mut conn) {
-                    Err(err) => error!("Error deleting old inactive attachments: {}", err),
-                    _ => {}
-                };
-
+                let conn = Self::connect();
                 info!("DB initialized.");
                 return conn;
             }
-            
-            
+        }
+
+        fn update_db() {
+            let mut conn = Self::connect();
+            let migrations = Migrations::new(vec![
+                M::up("ALTER TABLE document ADD COLUMN date_deleted INTEGER"),
+                M::up("ALTER TABLE attachment ADD COLUMN date_deleted INTEGER")
+            ]);
+
+            match migrations.to_latest(&mut conn) {
+                Ok(_) => info!("Database migration successful"),
+                Err(err) => error!("Database migration failed: {}", err)
+            }
+
+            match Self::delete_old_inactive_documents(&mut conn) {
+                Err(err) => error!("Error deleting old inactive documents: {}", err),
+                _ => {}
+            };
+            match Self::delete_old_inactive_attachments(&mut conn) {
+                Err(err) => error!("Error deleting old inactive attachments: {}", err),
+                _ => {}
+            };
         }
 
         fn connect() -> Connection {

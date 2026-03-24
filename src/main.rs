@@ -9,7 +9,6 @@ use std::fs;
 use std::path::Path;
 use std::time::{Instant, SystemTime};
 
-use hide_console_ng::hide_console;
 use iced::alignment::Horizontal::{self, Left};
 use iced::widget::image::Handle;
 use iced::{Alignment, Border, Color, Element, Length, Renderer, Subscription, Task, Theme, window};
@@ -22,8 +21,10 @@ use iced_aw::drop_down::{self, Offset};
 use iced_aw::sidebar::TabLabel;
 use iced_aw::style::{card, sidebar};
 use iced_aw::widget::Sidebar;
+use include_dir::{Dir, include_dir};
 use log::{LevelFilter, error, warn};
 use log4rs::append::file::FileAppender;
+use log4rs::append::rolling_file::policy::compound::trigger::onstartup::OnStartUpTrigger;
 use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
 use log4rs::append::rolling_file::{RollingFileAppender, policy};
 use log4rs::append::rolling_file::policy::Policy;
@@ -43,13 +44,20 @@ use crate::screen::{MainMenu, RecycleBin};
 use crate::screen::DocumentList;
 use crate::screen::Settings;
 
-const ERROR_FERRIS: &[u8] = include_bytes!("../ferris-error-handling.webp");
-const HOME_IMAGE: &[u8] = include_bytes!("../home.jpg");
-const ICON: &[u8] = include_bytes!("../icon.png");
+const ERROR_FERRIS: &[u8] = include_bytes!("../assets/ferris-error-handling.webp");
+const HOME_IMAGE: &[u8] = include_bytes!("../assets/home.jpg");
+const ICON: &[u8] = include_bytes!("../assets/icon.png");
+#[cfg(target_os = "windows")]
+const PDFIUM: &[u8] = include_bytes!("../resources/pdfium.dll");
+#[cfg(target_os = "linux")]
+const PDFIUM: &[u8] = include_bytes!("../resources/libpdfium.so");
+const NAPS2: Dir<'_> = include_dir!("./resources/naps2");
 
 
 pub fn main() -> iced::Result {
     init_logger();
+    init_pdfium();
+    init_naps2();
 
     iced::application(State::new, State::update, State::view)
     .title(State::window_title)
@@ -69,13 +77,14 @@ fn init_logger() {
     let date_format = format_description!("[year]-[month]-[day]");
     let offset_date = datetime.to_offset(OffsetDateTime::now_local().expect("Error applying date offset").offset()).format(date_format).unwrap();
     let roller = FixedWindowRoller::builder()
-        .build(format!("./logs/{}_{{}}.log", offset_date).as_str(), 5)
+        .build(format!("./logs/{}_{{}}.log", offset_date).as_str(), 3)
         .unwrap();
-    let trigger = SizeTrigger::new(10 * 1024 * 1024);
+    // let trigger = SizeTrigger::new(10 * 1024 * 1024);
+    let trigger = OnStartUpTrigger::new(0);
     let policy = CompoundPolicy::new(Box::new(trigger), Box::new(roller));
     let logfile = RollingFileAppender::builder()
         .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} {M} {L} [{l}] {m}\n")))
-        .build(format!("./logs/{}.log", offset_date), Box::new(policy))
+        .build(format!("./logs/current.log"), Box::new(policy))
         .unwrap();
 
     let log_config = log4rs::Config::builder()
@@ -86,6 +95,46 @@ fn init_logger() {
         .unwrap();
 
     log4rs::init_config(log_config).unwrap();
+}
+
+fn init_pdfium() {
+    if cfg!(target_os = "windows") {
+        if !fs::exists("./pdfium.dll").unwrap() {
+            match fs::write("./pdfium.dll", &PDFIUM) {
+                Err(err) => {
+                    error!("Error writing Pdfium bytes to file: {}", err);
+                },
+                _ => {}
+            }
+        }
+    }
+    else if cfg!(target_os = "linux") {
+        if !fs::exists("./libpdfium.so").unwrap() {
+            match fs::write("./libpdfium.so", &PDFIUM) {
+                Err(err) => {
+                    error!("Error writing Pdfium bytes to file: {}", err);
+                },
+                _ => {}
+            }
+        }
+    }
+}
+
+fn init_naps2() {
+    if !fs::exists("./naps2").unwrap() {
+        match fs::create_dir("./naps2") {
+            Err(err) => {
+                error!("Error creating NAPS2 directory: {}", err);
+            },
+            _ => {}
+        }
+        match NAPS2.extract("./naps2") {
+            Err(err) => {
+                error!("Error extracting NAPS2 files to directory: {}", err);
+            },
+            _ => {}
+        }
+    }
 }
 
 
@@ -197,15 +246,35 @@ impl Into<Theme> for LocalTheme {
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
     current_theme: LocalTheme,
+    delete_period: u16,
     show_console: bool
 }
 
 impl Config {
     fn new() -> Config {
-        let toml = fs::read_to_string("./config.toml").unwrap_or_else(|err| {
-            error!("Error reading config file: {}", err);
-            String::new()
-        });
+        let mut toml = String::new();
+        match fs::read_to_string("./config.toml") {
+            Ok(string) => {
+                toml = string;
+            },
+            Err(err) => {
+                error!("Error reading config file: {}", err);
+                let serialized = match toml::to_string(&Config::default()) {
+                    Ok(string) => string,
+                    Err(err) => {
+                        error!("Error serializing config to toml: {}", err);
+                        String::new()
+                    }
+                };
+                match fs::write("./config.toml", serialized) {
+                    Err(err) => {
+                        error!("Error writing to config file: {}", err);
+                    },
+                    _ => {}
+                };
+            }
+        }
+        
         match toml::from_str::<Config>(&toml) {
             Ok(config) => config,
             Err(err) => {
@@ -219,19 +288,16 @@ impl Config {
         self.current_theme = LocalTheme::from(theme);
     }
 
+    fn change_delete_period(&mut self, period: u16) {
+        self.delete_period = period;
+    }
+
     fn current_theme(&self) -> LocalTheme {
         return self.current_theme.clone()
     }
 
-    fn show_console(&self) {
-        match self.show_console {
-            true => {
-                hide_console_ng::show_unconditionally();
-            }
-            false => {
-                hide_console();
-            }
-        }
+    fn delete_period(&self) -> u16 {
+        return self.delete_period
     }
 }
 
@@ -239,6 +305,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             current_theme: LocalTheme::from(Theme::CatppuccinMacchiato),
+            delete_period: 30,
             show_console: false
         }
     }
@@ -288,6 +355,7 @@ impl State {
                 _ => Theme::Dark
             }
         );
+        settings.set_delete_period(config.delete_period());
         let mut state = State {
             current_tab: Tab::default(),
             main_menu: MainMenu::new(),
@@ -408,7 +476,7 @@ impl State {
                 }
             },
             Message::Settings(settings_message) => {
-                match settings_message {
+                match &settings_message {
                     settings::Message::ChangeTheme(theme) => {
                         self.config.change_theme(theme.clone());
                         let serialized = match toml::to_string(&self.config) {
@@ -426,10 +494,18 @@ impl State {
                         };
                         self.settings.set_theme(theme.clone());
                         self.document_list.set_current_theme(theme.clone().into());
-                    }
-                    settings::Message::ShowConsole(show_console) => {
-                        self.config.show_console = show_console;
-                        self.config.show_console();
+                    },
+                    settings::Message::ChangeDeletePeriod(period) => {
+                        let period_string: String = period.chars().filter(|c| c.is_numeric()).collect();
+                        match period_string.parse() {
+                            Ok(period) => {
+                                self.config.change_delete_period(period);
+                            }
+                            Err(err) => {
+                                error!("Error parsing delete period: {}", err);
+                            }
+                        }
+
                         let serialized = match toml::to_string(&self.config) {
                             Ok(string) => string,
                             Err(err) => {
@@ -443,6 +519,8 @@ impl State {
                             },
                             _ => {}
                         };
+
+
                         return self.settings.update(settings_message).map(Message::Settings)
                     }
                     settings::Message::Back => {
@@ -467,7 +545,6 @@ impl State {
     }
 
     fn view(&self) -> Element<Message> {
-        self.config.show_console();
         let screen = match &self.current_tab {
             Tab::Home => self.main_menu.view().map(Message::MainMenu),
             Tab::DocumentList => self.document_list.view().map(Message::DocumentList),
