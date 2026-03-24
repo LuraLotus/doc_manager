@@ -1,5 +1,5 @@
 # doc_manager
-A simple document manager.
+A simple document manager for Windows and Linux.
 
 ## Requirements
 ### Linux
