@@ -12,3 +12,5 @@ log.log
 /restored
 doc_manager.zip
 /naps2
+pdfium.dll
+libpdfium.so

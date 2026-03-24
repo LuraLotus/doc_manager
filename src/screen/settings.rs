@@ -78,8 +78,9 @@ pub(crate) mod settings {
                     ].spacing(5).align_y(Center),
                     Space::new().height(Length::Fill),
                     row![
-                        Text::new("Scanning powered by "),
+                        Space::new().width(Length::Fill),
                         Rich::with_spans([
+                            span("Scanning powered by "),
                             span("NAPS2").color(Color::from_rgb(0.2, 0.5, 1.0)).link("http://www.naps2.com")
                         ]).on_link_click(|link: String| Message::OpenLink(link))
                     ]
