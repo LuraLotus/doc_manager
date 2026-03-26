@@ -4,7 +4,7 @@ pub(crate) mod document_list {
     use base64::{Engine, prelude::BASE64_STANDARD};
     use caesium::{compress_in_memory, convert_in_memory, parameters::{CSParameters, PngParameters}};
     use file_format::FileFormat;
-    use iced::{Alignment::{self, Center}, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, Window, advanced::{Widget, graphics::{core::window, futures::subscription}}, alignment::Vertical::Bottom, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh::{self, WindowsDisplayHandle}, widget::{Container, Id, MouseArea, PickList, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable, stack}, window::{Settings, events}};
+    use iced::{Alignment::{self, Center}, Background, Border, Color, Element, Event, Gradient, Length, Renderer, Shadow, Subscription, Task, Theme, Window, advanced::{Widget, graphics::{core::window, futures::subscription}}, alignment::Vertical::Bottom, border::Radius, gradient::{ColorStop, Linear}, keyboard::{self, Key, key}, mouse::Interaction, theme::Palette, wgpu::rwh::{self, WindowsDisplayHandle}, widget::{Container, Id, MouseArea, PickList, ProgressBar, Space, Stack, Text, TextInput, button, center, column, container::{self, Style}, image::{Handle, Viewer}, mouse_area, operation::focus_next, progress_bar, row, rule, scrollable, span, stack, text::Rich}, window::{Settings, events}};
     use iced::widget::text_input;
     use iced_aw::{Card, Spinner, TabBar, TabBarPosition, TabLabel, Tabs, card::Status, drop_down::Offset, style::{card, tab_bar}};
     use iced_dialog::dialog;
@@ -17,6 +17,7 @@ pub(crate) mod document_list {
     use strum::{Display, EnumIter, IntoEnumIterator};
     use tempfile::tempfile;
     use time::{Duration, OffsetDateTime, UtcDateTime, macros::format_description};
+    use which::which;
 
     use crate::{Config, ERROR_FERRIS, LocalTheme, State, attachment::attachment::Attachment, attachment_page::attachment_page::AttachmentPage, db::db_module::DbConnection, document::document::Document};
 
@@ -60,7 +61,8 @@ pub(crate) mod document_list {
         selected_page_size: PaperSize,
         selected_dpi: DPI,
         selected_bitdepth: Bitdepth,
-        fetching_scanners: bool
+        fetching_scanners: bool,
+        naps2_installed: bool
     }
 
     impl DocumentList {
@@ -104,7 +106,8 @@ pub(crate) mod document_list {
                 selected_page_size: PaperSize::default(),
                 selected_dpi: DPI::default(),
                 selected_bitdepth: Bitdepth::default(),
-                fetching_scanners: false
+                fetching_scanners: false,
+                naps2_installed: false,
             }
         }
 
@@ -627,23 +630,40 @@ pub(crate) mod document_list {
                     }
                 },
                 Message::ShowScanDialog => {
-                    self.show_scan_dialog = true;
-                    if self.device_list.is_empty() {
-                        self.fetching_scanners = true;
-                        Task::perform(fetch_scanners(), |result| match result {
-                            Ok(list) => {
-                                Message::ScannersFound(list)
-                            },
+                    if cfg!(target_os = "linux") {
+                        self.naps2_installed = which("naps2").is_ok();
+                    }
+                    else if cfg!(target_os = "windows") {
+                        self.naps2_installed = match fs::exists("./naps2/NAPS2.Console.exe") {
+                            Ok(bool) => bool,
                             Err(err) => {
-                                error!("Error fetching scanners: {}", err);
-                                Message::ScannerFetchFail
+                                error!("Error checking for NAPS2: {}", err);
+                                false
                             }
-                        })
+                        };
+                    }
+
+                    if self.naps2_installed {
+                        self.show_scan_dialog = true;
+                        if self.device_list.is_empty() {
+                            self.fetching_scanners = true;
+                            Task::perform(fetch_scanners(), |result| match result {
+                                Ok(list) => {
+                                    Message::ScannersFound(list)
+                                },
+                                Err(err) => {
+                                    error!("Error fetching scanners: {}", err);
+                                    Message::ScannerFetchFail
+                                }
+                            })
+                        }
+                        else {
+                            Task::none()
+                        }
                     }
                     else {
                         Task::none()
                     }
-                    
                 },
                 Message::ScannersFound(list) => {
                     self.device_list.clear();
@@ -893,6 +913,15 @@ pub(crate) mod document_list {
                     if self.current_page_index < self.current_file_handles.as_ref().unwrap().len() - 1 {
                         self.current_page_index += 1;
                     }
+                    Task::none()
+                },
+                Message::OpenLink(link) => {
+                    match opener::open(link) {
+                        Err(err) => {
+                            error!("Error opening link: {}", err);
+                        },
+                        _ => {}
+                    };
                     Task::none()
                 }
             }
@@ -1185,6 +1214,23 @@ pub(crate) mod document_list {
                                                             MouseArea::new(Space::new().width(Length::Fill).height(Length::Fill)).interaction(Interaction::Idle).into(),
                                                             Container::new(
                                                                 center(scan_dialog(self.device_list.clone(), self.selected_device.clone(), self.fetching_scanners.clone(), self.selected_source.clone(), self.selected_page_size.clone(), self.selected_dpi.clone(), self.selected_bitdepth.clone()))
+                                                            ).width(Length::Fill).height(Length::Fill).style(|_theme| container::Style {
+                                                                background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.4).into()), // dims the content behind scan dialog
+                                                                border: Border {
+                                                                    radius: 5.0.into(),
+                                                                    ..Default::default()
+                                                                }, 
+                                                                ..Default::default()
+                                                            }).into()
+                                                        ]
+                                                    );
+                                                }
+                                                if self.naps2_installed == false {
+                                                    content = content.extend(
+                                                        vec![
+                                                            MouseArea::new(Space::new().width(Length::Fill).height(Length::Fill)).interaction(Interaction::Idle).into(),
+                                                            Container::new(
+                                                                center(naps2_install_dialog())
                                                             ).width(Length::Fill).height(Length::Fill).style(|_theme| container::Style {
                                                                 background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.4).into()), // dims the content behind scan dialog
                                                                 border: Border {
@@ -1804,6 +1850,23 @@ pub(crate) mod document_list {
         ).padding(5).style(container::bordered_box).width(Length::Fixed(800.0)).height(Length::Fixed(400.0))
     }
 
+    fn naps2_install_dialog() -> Container<'static, Message> {
+        Container::new(
+            column![
+                Text::new("NAPS2 is not installed"),
+                rule::horizontal(2),
+                Rich::with_spans(
+                    vec![
+                        span("NAPS2 is required to use the scanning feature.\n"),
+                        span("Download:\n"),
+                        span("Official site (naps2.com)\n").color(Color::from_rgb(0.2, 0.5, 1.0)).link("http://www.naps2.com"),
+                        span("or from your distro's package manager.")
+                    ]
+                ).on_link_click(|link: String| Message::OpenLink(link))
+            ]
+        ).padding(5).style(container::bordered_box).width(600).height(400)
+    }
+
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Display, EnumIter)]
     enum PaperSource {
         #[strum(serialize = "Glass")]
@@ -2234,6 +2297,7 @@ pub(crate) mod document_list {
         ExportFail,
         PrevPage,
         NextPage,
+        OpenLink(String),
         None,
     }
 

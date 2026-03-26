@@ -51,12 +51,14 @@ const ICON: &[u8] = include_bytes!("../assets/icon.png");
 const PDFIUM: &[u8] = include_bytes!("../resources/pdfium.dll");
 #[cfg(target_os = "linux")]
 const PDFIUM: &[u8] = include_bytes!("../resources/libpdfium.so");
+#[cfg(target_os = "windows")]
 const NAPS2: Dir<'_> = include_dir!("./resources/naps2");
 
 
 pub fn main() -> iced::Result {
     init_logger();
     init_pdfium();
+    #[cfg(target_os = "windows")]
     init_naps2();
 
     iced::application(State::new, State::update, State::view)
@@ -77,14 +79,14 @@ fn init_logger() {
     let date_format = format_description!("[year]-[month]-[day]");
     let offset_date = datetime.to_offset(OffsetDateTime::now_local().expect("Error applying date offset").offset()).format(date_format).unwrap();
     let roller = FixedWindowRoller::builder()
-        .build(format!("./logs/{}_{{}}.log", offset_date).as_str(), 3)
+        .build(format!("./logs/archive_{{}}.log").as_str(), 3)
         .unwrap();
     // let trigger = SizeTrigger::new(10 * 1024 * 1024);
     let trigger = OnStartUpTrigger::new(0);
     let policy = CompoundPolicy::new(Box::new(trigger), Box::new(roller));
     let logfile = RollingFileAppender::builder()
         .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} {M} {L} [{l}] {m}\n")))
-        .build(format!("./logs/current.log"), Box::new(policy))
+        .build(format!("./logs/latest.log"), Box::new(policy))
         .unwrap();
 
     let log_config = log4rs::Config::builder()
@@ -119,7 +121,7 @@ fn init_pdfium() {
         }
     }
 }
-
+#[cfg(target_os = "windows")]
 fn init_naps2() {
     if !fs::exists("./naps2").unwrap() {
         match fs::create_dir("./naps2") {
