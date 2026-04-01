@@ -2034,7 +2034,7 @@ pub(crate) mod document_list {
             .map_err(|err| err.to_string())?;
 
         #[cfg(target_os = "linux")]
-        let mut output = Command::new("/usr/bin/naps2")
+        let mut output = Command::new("naps2")
             .arg("console")
             .arg("-o")
             .arg(format!("{}", &temp_path.to_string_lossy()))
