@@ -11,5 +11,5 @@ log.log
 /logs
 /restored
 doc_manager.zip
-./pdfium.dll
-./libpdfium.so
+/pdfium.dll
+/libpdfium.so
